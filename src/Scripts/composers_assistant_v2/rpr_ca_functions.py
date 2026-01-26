@@ -107,6 +107,22 @@ class NNInput(object):
         self.track_gen_options_by_track_idx = track_gen_options_by_track_idx
         self.requests_by_track_i_and_measure_i = requests_by_track_i_and_measure_i
 
+class MMMInput(object):
+    def __init__(
+            self, 
+            S, 
+            continue_,
+            start_measure,
+            end_measure,
+            masks,
+            extra_ids_map
+        ):
+        self.S = S
+        self.continue_ = continue_
+        self.start_measure = start_measure
+        self.end_measure = end_measure
+        self.masks = masks
+        self.extra_ids_map = extra_ids_map
 
 # helper function
 def rpr_track_idx_to_S_track_idx(rpr_track_idx, S):
@@ -458,7 +474,9 @@ def get_nn_input_from_project(warn_if_no_masks=True, mask_empty_midi_items=True,
                                                                   restrict_to_time_selection=False,
                                                                   excl_track_name_substrings=EXCL_TRACK_NAME_SUBSTRINGS,
                                                                   display_warnings=display_warnings)
+    print(notes_by_trackidx)
     track_names = mm.get_track_names()
+    print("track_names", track_names) 
     AT_by_track_idx = mt.get_active_takes_with_info_by_trackidx(include_muted_tracks=False, midi_items_only=True,
                                                                 include_muted_items=False,
                                                                 excl_track_name_substrings=EXCL_TRACK_NAME_SUBSTRINGS)
@@ -468,6 +486,7 @@ def get_nn_input_from_project(warn_if_no_masks=True, mask_empty_midi_items=True,
     # define start_measure and end_measure based on time selection and notes in project.
     start_measure = 0
     time_selection = mt.get_time_selection()
+    print("time_selection", time_selection)
     if time_selection is not None:
         start_measure = mt.qn_to_measure(mt.sec_to_QN(time_selection[0])+.0001)
 
@@ -554,6 +573,10 @@ def get_nn_input_from_project(warn_if_no_masks=True, mask_empty_midi_items=True,
 
         end_measure = max_measure
 
+    if DEBUG:
+        print('start_measure: {}'.format(start_measure))
+        print('end_measure: {}'.format(end_measure))
+
     # Get all measure endpoints from the 0th measure to the last measure
     MEs_qn = mt.get_measure_endpoints_in_QN(first_measure_index=0,
                                             last_measure_index=end_measure + 4)  # add a few measures for note offs at end and such
@@ -612,6 +635,8 @@ def get_nn_input_from_project(warn_if_no_masks=True, mask_empty_midi_items=True,
     for t in S.tracks:
         t.sort()
 
+    print("Song",S)
+
     if display_track_to_MIDI_inst:
         display_track_to_inst_dict = {}
         for t in S.tracks:
@@ -664,6 +689,8 @@ def get_nn_input_from_project(warn_if_no_masks=True, mask_empty_midi_items=True,
                     print(warning)
                     WARNINGS_PRINTED.add(warning)
 
+    print("masks", masks)
+
     if not masks and warn_if_no_masks:
         warning = 'ERROR: No requests made. '
         if mask_empty_midi_items and not mask_selected_midi_items:
@@ -698,13 +725,16 @@ def get_nn_input_from_project(warn_if_no_masks=True, mask_empty_midi_items=True,
 
     extra_id_to_miditake_and_measure_i = {}
     extra_id_to_inst = {}
+    extra_id_to_inst_idx = {}
     for i, T in enumerate(masks_for_S_in_order):
         rpr_track_i, measure_i = S_mask_to_rpr_mask[T]
         extra_id_to_miditake_and_measure_i[extra_id_st + i] = (requests_by_track_i_and_measure_i[(rpr_track_i, measure_i)], measure_i)
         # also record the instrument that goes with each extra_id
         extra_id_to_inst[extra_id_st + i] = get_inst_from_track_name(S.tracks[T[0]].name)
+        extra_id_to_inst_idx[extra_id_st + i] = T[0]
         if DEBUG:
             print('eid to inst:', extra_id_to_inst)
+            print('eid to inst index:', extra_id_to_inst_idx)
 
     # next, use vel_track track to impute velocity requests
     velocity_overrides = {}
@@ -763,7 +793,18 @@ def get_nn_input_from_project(warn_if_no_masks=True, mask_empty_midi_items=True,
     # TODO: This logic is not correct anymore if mask_selected_midi_items = True. However, this value is not currently used anywhere else.
     has_fully_masked_inst = any(not t.has_notes() for t in S.tracks)
 
-    return NNInput(nn_input_string=s,
+    extra_ids_map = {str(eid): (extra_id_to_inst_idx[eid],mes) for eid, (take, mes) in extra_id_to_miditake_and_measure_i.items()}
+
+    mmm_input = MMMInput(
+        S=S,
+        continue_=continue_,
+        start_measure=start_measure,
+        end_measure=end_measure,
+        masks=masks_for_S_in_order,
+        extra_ids_map = extra_ids_map
+    )
+
+    return mmm_input, NNInput(nn_input_string=s,
                    extra_id_to_miditake_and_measure_i=extra_id_to_miditake_and_measure_i,
                    MEs_qn=MEs_qn,
                    S=S,

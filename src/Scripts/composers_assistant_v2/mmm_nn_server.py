@@ -6,6 +6,16 @@ import json
 from xmlrpc.server import SimpleXMLRPCServer
 import mido
 
+from collections import defaultdict
+
+from transformers import (
+    AutoModelForCausalLM,
+    GenerationConfig
+)
+from miditok import MMM
+from miditok.utils import get_bars_ticks
+from symusic import Score, TimeSignature
+
 DEBUG = True
 PORT = 3456
 
@@ -15,11 +25,10 @@ import preprocessing_functions as pre
 MMM_AVAILABLE = False
 MODEL = None
 TOKENIZER = None
-LAST_CALL = None
-LAST_OUTPUTS = set()
 
 try:
-    from mmm import Model, Tokenizer, PromptConfig, SamplingEngine, GenerationConfig, Score, generate, ModelConfig
+    #from mmm import Model, Tokenizer, PromptConfig, SamplingEngine, GenerationConfig, Score, generate, ModelConfig
+    from mmm import generate, InferenceConfig
     MMM_AVAILABLE = True
     print("MMM library loaded successfully")
 except ImportError as e:
@@ -32,19 +41,26 @@ def initialize_mmm():
     if not MMM_AVAILABLE:
         return False
     
+    check_num = 172000
+    #check_num = 137000
+    model_type="large"
+    #model_type="medium"
+
     try:
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        tokenizer_path = os.path.join(script_dir, 'models/MMM.json')
-        model_path = os.path.join(script_dir, 'models/model.onnx')
+        tokenizer_path = os.path.join(script_dir, f'models/gpt2_{model_type}_v1/checkpoint-{check_num}/MMM_gpt2_{model_type}_tokenizer.json')
+        model_path = os.path.join(script_dir, f'models/gpt2_{model_type}_v1/checkpoint-{check_num}')
         
         if DEBUG:
             print("\n=== INITIALIZING MMM ===")
             print(f"  Tokenizer: {tokenizer_path}")
             print(f"  Model: {model_path}")
         
-        TOKENIZER = Tokenizer(tokenizer_path)
-        model_cfg = ModelConfig(model=model_path, cached=False, vocab_size=16000)
-        MODEL = Model(model_cfg)
+        #TOKENIZER = Tokenizer(tokenizer_path)
+        #model_cfg = ModelConfig(model=model_path, cached=False, vocab_size=16000)
+        #MODEL = Model(model_cfg)
+        TOKENIZER = MMM(params=tokenizer_path)
+        MODEL = AutoModelForCausalLM.from_pretrained(model_path)
         
         if DEBUG:
             print("  MMM initialized successfully")
@@ -58,6 +74,43 @@ def initialize_mmm():
             traceback.print_exc()
         return False
 
+
+def bars_to_ranges(pairs):
+    tracks = defaultdict(list)
+    
+    # group bars by track
+    for track, bar in pairs:
+        tracks[track].append(bar)
+    
+    result = {}
+    
+    for track, bars in tracks.items():
+        bars = sorted(bars)
+        ranges = []
+        
+        start = prev = bars[0]
+        
+        for b in bars[1:]:
+            if b == prev + 1:
+                prev = b
+            else:
+                ranges.append((start, prev + 1, []))
+                start = prev = b
+        
+        # last range
+        ranges.append((start, prev + 1, []))
+        result[track] = ranges
+    
+    return result
+
+def selected_measures(ranges_by_track):
+    selected = set()
+    
+    for ranges in ranges_by_track.values():
+        for start, end, _ in ranges:
+            selected.update(range(start, end))
+    
+    return sorted(selected)
 
 def parse_measures_with_extra_ids(s, start_measure, end_measure, debug=False):
     """
@@ -118,132 +171,15 @@ def parse_measures_with_extra_ids(s, start_measure, end_measure, debug=False):
     
     return marked_measures, extra_id_to_measure, extra_id_to_track
 
-
-def detect_measures_to_generate(S, s, start_measure, end_measure, has_extra_ids, debug=False):
-    measures_to_generate = set()
-    extra_id_to_measure = {}
-    extra_id_to_track = {}
-    
-    if start_measure is None or end_measure is None:
-        if debug:
-            print("  No selection bounds")
-        return measures_to_generate, extra_id_to_measure, extra_id_to_track
-    
-    if debug:
-        print(f"\n=== MEASURE DETECTION ===")
-        print(f"  Selection: measures {start_measure}-{end_measure}")
-        print(f"  Has extra_ids: {has_extra_ids}")
-    
-    if has_extra_ids:
-        marked_measures, extra_id_to_measure, extra_id_to_track = parse_measures_with_extra_ids(
-            s, start_measure, end_measure, debug
-        )
-        measures_to_generate = marked_measures
-        if debug:
-            print(f"  Marked measures: {sorted(marked_measures)}")
-            print(f"  Extra_id mapping: {extra_id_to_measure}")
-            print(f"  Track mapping: {extra_id_to_track}")
-    else:
-        if debug:
-            print("  No extra_ids, nothing to generate")
-    
-    if debug:
-        print(f"  Will generate: {sorted(measures_to_generate)}")
-    
-    return measures_to_generate, extra_id_to_measure, extra_id_to_track
-
-
-def build_track_specific_bar_mode(S, measures_to_generate, extra_id_to_measure, extra_id_to_track, debug=False):
-    """
-    Build bar_mode dictionary with track-specific infill ranges.
-    When extra_id tokens are present, include those measures EVEN IF they have content,
-    because the user explicitly wants to regenerate them.
-    """
-    bar_mode = {"bars": {}}
-    
-    if not measures_to_generate:
-        return bar_mode
-    
-    # Build reverse mapping: measure -> extra_id
-    measure_to_extra_id = {v: k for k, v in extra_id_to_measure.items()}
-    
-    # Check each track in S to see which measures need generation
-    track_to_measures = {}
-    
-    for track_idx, track in enumerate(S.tracks):
-        track_measures = []
-        for measure_idx in measures_to_generate:
-            # CRITICAL: Include measure if it has an extra_id token for this track
-            # This handles the case where user wants to REPLACE existing content
-            has_extra_id_for_this_track = (
-                measure_idx in measure_to_extra_id and
-                extra_id_to_track.get(measure_to_extra_id[measure_idx]) == track_idx
-            )
-            
-            # Check if this measure is empty in this track
-            is_empty = False
-            if measure_idx >= len(track.tracks_by_measure):
-                is_empty = True
-            else:
-                measure_track = track.tracks_by_measure[measure_idx]
-                if not (hasattr(measure_track, 'note_ons') and measure_track.note_ons):
-                    is_empty = True
-            
-            # Include measure if it's empty OR has an extra_id for this track
-            if is_empty or has_extra_id_for_this_track:
-                track_measures.append(measure_idx)
-                if debug and has_extra_id_for_this_track and not is_empty:
-                    print(f"    Track {track_idx}, Measure {measure_idx}: has content but extra_id present, will regenerate")
-        
-        if track_measures:
-            track_to_measures[track_idx] = track_measures
-    
-    if debug:
-        print(f"  Track-to-measures mapping:")
-        for track_idx, measures in sorted(track_to_measures.items()):
-            print(f"    Track {track_idx}: {sorted(measures)}")
-    
-    # Build ranges for each track
-    for track_idx, track_measures in track_to_measures.items():
-        if not track_measures:
-            continue
-        
-        sorted_measures = sorted(track_measures)
-        
-        # Group into contiguous ranges
-        ranges = []
-        range_start = sorted_measures[0]
-        range_end = sorted_measures[0]
-        
-        for measure in sorted_measures[1:]:
-            if measure == range_end:
-                range_end = measure + 1
-            elif measure == range_end + 1:
-                range_end = measure
-            else:
-                ranges.append((range_start, range_end + 1, []))
-                range_start = measure
-                range_end = measure
-        
-        ranges.append((range_start, range_end + 1, []))
-        
-        bar_mode["bars"][track_idx] = ranges
-        
-        if debug:
-            print(f"  Track {track_idx} ranges: {ranges}")
-    
-    return bar_mode
-
-
-def convert_midi_to_ca_format_with_timing(midi_path, project_measures, measures_to_generate, 
-                                          extra_id_to_measure, input_ticks_per_beat=None, 
+def convert_midi_to_ca_format_with_timing(midi_path, project_measures, bars_to_generate, 
+                                          extra_ids_map, input_ticks_per_beat=None, 
                                           input_time_signature=None):
     if DEBUG:
         print(f"\n=== CA FORMAT CONVERSION ===")
         print(f"  MIDI: {midi_path}")
         print(f"  Project measures: {project_measures}")
-        print(f"  Measures to generate: {sorted(measures_to_generate)}")
-        print(f"  Extra_id mapping: {extra_id_to_measure}")
+        print(f"  Measures to generate: {bars_to_generate}")
+        print(f"  Extra_id mapping: {extra_ids_map}")
     
     midi_file = mido.MidiFile(midi_path)
     output_ticks_per_beat = midi_file.ticks_per_beat
@@ -281,9 +217,12 @@ def convert_midi_to_ca_format_with_timing(midi_path, project_measures, measures_
         print(f"  Measure length: {measure_length} ticks")
     
     all_notes = []
+    num_tracks = len(midi_file.tracks)
     for track_idx, track in enumerate(midi_file.tracks):
         current_time = 0
         active_notes = {}
+
+        #all_notes[str(track_idx)] = []
         
         for msg in track:
             current_time += msg.time
@@ -302,57 +241,76 @@ def convert_midi_to_ca_format_with_timing(midi_path, project_measures, measures_
                         'pitch': msg.note,
                         'start': converted_start,
                         'duration': converted_duration,
-                        'velocity': active_notes[msg.note]['velocity']
+                        'velocity': active_notes[msg.note]['velocity'],
+                        'instrument': track_idx
                     })
                     del active_notes[msg.note]
     
     if DEBUG:
         print(f"  Extracted {len(all_notes)} notes from MIDI")
+
+    measures_to_generate = selected_measures(bars_to_generate)
     
-    notes_by_measure = {m: [] for m in measures_to_generate}
+    notes_by_measure = {str(track_idx): {str(m): [] for m in measures_to_generate} for track_idx in range(num_tracks)}
     
     for note in all_notes:
         measure_idx = note['start'] // measure_length
         
         if measure_idx in measures_to_generate:
             position_in_measure = note['start'] - (measure_idx * measure_length)
-            notes_by_measure[measure_idx].append({
+            notes_by_measure[str(note['instrument'])][str(measure_idx)].append({
                 'pitch': note['pitch'],
                 'position': position_in_measure,
                 'duration': note['duration'],
                 'velocity': note['velocity']
             })
     
-    measure_to_extra_id = {m: eid for eid, m in extra_id_to_measure.items()}
+    #measure_to_extra_id = {str(m): int(eid) for eid, (t,m) in extra_ids_map.items()}
+    tm_to_extra = {}
+
+    for extra_id, (track_idx, measure_idx) in extra_ids_map.items():
+        tm_to_extra.setdefault(str(track_idx), {})[str(measure_idx)] = extra_id
     
+    print("tm_to_extra",tm_to_extra)
+
     sections = []
-    for measure in sorted(measures_to_generate):
-        notes = notes_by_measure[measure]
-        
-        if measure not in measure_to_extra_id:
-            if DEBUG:
-                print(f"  Warning: measure {measure} has no extra_id mapping, skipping")
-            continue
-        
-        extra_id = measure_to_extra_id[measure]
-        notes.sort(key=lambda n: (n['position'], n['pitch']))
-        
-        note_tokens = []
-        last_position_in_measure = 0
-        
-        for note in notes:
-            position_in_measure = note['position']
-            wait = position_in_measure - last_position_in_measure
-            if wait > 0:
-                note_tokens.append(f"w:{int(wait)}")
-            
-            note_tokens.append(f"N:{note['pitch']}")
-            note_tokens.append(f"d:{int(note['duration'])}")
-            
-            last_position_in_measure = position_in_measure
-        
-        section = f"<extra_id_{extra_id}>;" + ';'.join(note_tokens)
-        sections.append(section)
+    #for measure in sorted(measures_to_generate):
+    for track_idx, bars_in_track in bars_to_generate.items():
+        for range_to_gen in bars_in_track:
+            for measure in range(range_to_gen[0], range_to_gen[1]):
+                notes = notes_by_measure[str(track_idx)][str(measure)]
+                
+                if str(track_idx) not in tm_to_extra:
+                    if DEBUG:
+                        print(f"  Warning: track {track_idx} has no extra_id mapping, skipping")
+                    continue
+
+                if str(measure) not in tm_to_extra[str(track_idx)]:
+                    if DEBUG:
+                        print(f"  Warning: measure {measure} in track {track_idx} has no extra_id mapping, skipping")
+                    continue
+                
+                extra_id = tm_to_extra[str(track_idx)][str(measure)]
+                notes.sort(key=lambda n: (n['position'], n['pitch']))
+                
+                note_tokens = []
+                last_position_in_measure = 0
+                
+                for note in notes:
+                    position_in_measure = note['position']
+                    wait = position_in_measure - last_position_in_measure
+                    if wait > 0:
+                        note_tokens.append(f"w:{int(wait)}")
+                    
+                    note_tokens.append(f"N:{note['pitch']}")
+                    note_tokens.append(f"d:{int(note['duration'])}")
+                    note_tokens.append(f"v:{note['velocity']}")
+                    #note_tokens.append(f"I:{note["instrument"]}")
+                    
+                    last_position_in_measure = position_in_measure
+                
+                section = f"<extra_id_{extra_id}>;" + ';'.join(note_tokens)
+                sections.append(section)
     
     result = ';' + ';'.join(sections)
     
@@ -365,9 +323,7 @@ def convert_midi_to_ca_format_with_timing(midi_path, project_measures, measures_
     return result
 
 
-def call_nn_infill(s, S, use_sampling=True, min_length=10, enc_no_repeat_ngram_size=0, 
-                   has_fully_masked_inst=False, options_dict=None, start_measure=None, end_measure=None):
-    global LAST_CALL, LAST_OUTPUTS
+def call_nn_infill(S, masks, extra_ids_map, options_dict=None, start_measure=None, end_measure=None):
     
     if options_dict is None:
         options_dict = {}
@@ -396,10 +352,9 @@ def call_nn_infill(s, S, use_sampling=True, min_length=10, enc_no_repeat_ngram_s
             if DEBUG:
                 print("  MMM not available, returning fallback")
             return ";M:0;B:5;L:96;<extra_id_0>N:60;d:240;w:240"
-        
-        s_normalized = re.sub(r'<extra_id_\d+>', '<extra_id_0>', s)
-        
-        extra_ids = [int(m) for m in re.findall(r'<extra_id_(\d+)>', s)]
+                
+        #extra_ids = [int(m) for m in re.findall(r'<extra_id_(\d+)>', s)]
+        extra_ids = [int(k) for k in  extra_ids_map.keys()]
         actual_extra_id = extra_ids[0] if extra_ids else 0
         
         if isinstance(S, dict):
@@ -411,18 +366,18 @@ def call_nn_infill(s, S, use_sampling=True, min_length=10, enc_no_repeat_ngram_s
             print(f"  Extra IDs: {extra_ids}")
             print(f"  Project: {len(project_measures)} measures, {len(S.tracks)} tracks")
         
-        measures_to_generate, extra_id_to_measure, extra_id_to_track = detect_measures_to_generate(
-            S, s, start_measure, end_measure, bool(extra_ids), debug=DEBUG
-        )
+        #measures_to_generate, extra_id_to_measure, extra_id_to_track = detect_measures_to_generate(
+        #    S, s, start_measure, end_measure, bool(extra_ids), debug=DEBUG
+        #)
         
-        if not measures_to_generate:
+        if not masks:
             if DEBUG:
                 print("  No measures to generate")
             return f";<extra_id_{actual_extra_id}>"
         
         with tempfile.NamedTemporaryFile(suffix='.mid', delete=False) as tmp:
             temp_midi_path = tmp.name
-        temp_midi_path = '/Users/griffinpage/Documents/GitHub/midigpt-REAPER/test_in.mid'
+        temp_midi_path = '/Users/paultriana/creative_labs/midigpt-REAPER/tests/mmm_test.mid'
         S.dump(filename=temp_midi_path)
         
         if DEBUG:
@@ -438,25 +393,58 @@ def call_nn_infill(s, S, use_sampling=True, min_length=10, enc_no_repeat_ngram_s
                     break
         
         score_obj = Score(temp_midi_path)
+
+        # Remove time signatures and tempos occurring after the start of the last note
+        max_note_time = 0
+        for track in score_obj.tracks:
+            if len(track.notes) > 0:
+                max_note_time = max(max_note_time, track.notes[-1].time)
+        for ti in reversed(range(len(score_obj.time_signatures))):
+            #if score_obj.time_signatures[ti].time > max_note_time:
+            del score_obj.time_signatures[ti]
+            #else:
+            #    break
+        for ti in reversed(range(len(score_obj.tempos))):
+            #if score_obj.tempos[ti].time > max_note_time:
+            del score_obj.tempos[ti]
+            #else:
+            #    break
         
+        clip_time = (end_measure + 1) * score_obj.tpq * 4
+        
+        score_obj = score_obj.clip(
+            0,
+            clip_time,
+            clip_end = True, # If True, also clip notes ending after 'end'
+            inplace = False
+        )
+
+        score_obj.dump_midi(temp_midi_path)
+        score_obj = Score(temp_midi_path)
+
         context_length = model_dim
-        
+
         if DEBUG:
             print(f"\n=== BUILDING PROMPT CONFIG ===")
             print(f"  REAPER selection: measures {start_measure}-{end_measure}")
             print(f"  Total measures in score: {len(project_measures)}")
             print(f"  Context length: {context_length} bars (on each side of target)")
-            print(f"  Measures to infill: {sorted(measures_to_generate)}")
+            print(f"  Measures to infill: {masks}")
+            print(f"  Extra IDs to measure: {extra_ids_map}")
         
         # Build track-specific bar mode
-        bar_mode = build_track_specific_bar_mode(
-            S, measures_to_generate, extra_id_to_measure, extra_id_to_track, debug=DEBUG
-        )
+        bar_mode = {}
+        bar_mode["bars"] = bars_to_ranges(masks)
         
         if not bar_mode["bars"]:
             if DEBUG:
                 print("  No tracks need infilling, using empty config")
-            prompt_cfg = PromptConfig({}, context_length=context_length)
+            #prompt_cfg = PromptConfig({}, context_length=context_length)
+            prompt_cfg = InferenceConfig(
+                context_length=context_length,
+                bars_to_generate = {},
+                new_tracks = []
+            )
         else:
             if DEBUG:
                 print(f"  Total tracks in score: {len(S.tracks)}")
@@ -464,46 +452,59 @@ def call_nn_infill(s, S, use_sampling=True, min_length=10, enc_no_repeat_ngram_s
                 for track_idx, ranges in bar_mode["bars"].items():
                     print(f"    Track {track_idx}: {ranges}")
             
-            prompt_cfg = PromptConfig(bar_mode, context_length=context_length)
+            #prompt_cfg = PromptConfig(bar_mode, context_length=context_length)
+            prompt_cfg = InferenceConfig(
+                context_length=context_length,
+                bars_to_generate=bar_mode["bars"],
+                new_tracks=[]
+            )
         
         gen_cfg = GenerationConfig(
-            do_sample=use_sampling,
-            max_new_tokens=256,
-            attempts=4,
-            pad_token_id=0,
-            repetition_penalty=1.0,
+            do_sample=True,
+            max_new_tokens=1024,
+            repetition_penalty=1.2,
             temperature=temperature,
-            top_k=50,
-            top_p=1.0,
+            num_beams=1,
+            top_k=20,
+            top_p=0.95,
+            epsilon_cutoff=None,
+            eta_cutoff=None
         )
+
+        print(gen_cfg)
         
-        engine = SamplingEngine(gen_cfg, TOKENIZER, seed=sampling_seed, verbose=DEBUG)
+        #engine = SamplingEngine(gen_cfg, TOKENIZER, seed=sampling_seed, verbose=DEBUG)
         
         if DEBUG:
             print(f"\n=== MMM GENERATION ===")
             print(f"  Tracks: {len(S.tracks)}")
-            print(f"  Generating measures: {sorted(measures_to_generate)}")
+            print(f"  Generating measures: {masks}")
             print(f"  Context length: {prompt_cfg.context_length} bars")
-            print(f"  Temperature: {temperature}")
+            print(f"  Temperature: {gen_cfg.temperature}")
             print(f"  Max tokens: {gen_cfg.max_new_tokens}")
-            print(f"  PromptConfig:")
-            print(f"    Mode: {'BarInfilling' if prompt_cfg.bar_infilling() else 'Other'}")
-            print(f"    Empty: {prompt_cfg.empty()}")
-            if prompt_cfg.bar_infilling() and not prompt_cfg.empty():
-                bars_dict = prompt_cfg.bars()
+            print(f"  InferenceConfig:")
+            print(f"    Mode: {'BarInfilling' if prompt_cfg.infilling else 'Other'}")
+            if prompt_cfg.infilling:
+                bars_dict = prompt_cfg.bars_to_generate
                 print(f"    Tracks configured: {len(bars_dict)}")
                 for track_idx, ranges in bars_dict.items():
                     print(f"      Track {track_idx}: {ranges}")
         
         try:
-            generated_score = generate(
+            result = generate(
                 model=MODEL,
                 tokenizer=TOKENIZER,
-                prompt_config=prompt_cfg,
-                sampling_engine=engine,
-                score=score_obj,
-                verbose=bool(DEBUG)
+                inference_config=prompt_cfg,
+                score_or_path=score_obj,
+                generate_kwargs= {
+                    "generation_config": gen_cfg
+                },
+                seq2seq=False
             )
+            generated_score = result["score"]
+            if DEBUG:
+                print(f"\n=== TIME METRICS ===")
+                print(result["time_metrics"])
         except Exception as gen_error:
             if DEBUG:
                 print(f"\n=== GENERATION ERROR ===")
@@ -514,10 +515,14 @@ def call_nn_infill(s, S, use_sampling=True, min_length=10, enc_no_repeat_ngram_s
         
         with tempfile.NamedTemporaryFile(suffix='.mid', delete=False) as tmp:
             result_midi_path = tmp.name
-        result_midi_path = '/Users/griffinpage/Documents/GitHub/midigpt-REAPER/test_out.mid'
+        result_midi_path = '/Users/paultriana/creative_labs/midigpt-REAPER/tests/mmm_test_out.mid'
+        #result_midi_path = '/Users/griffinpage/Documents/GitHub/midigpt-REAPER/test_out.mid'
         
         try:
-            generated_score.save(result_midi_path)
+            #generated_score.save(result_midi_path)
+            if DEBUG:
+                print(f"\nSaving result to {result_midi_path}")
+            generated_score.dump_midi(result_midi_path)
         except Exception as save_error:
             if DEBUG:
                 print(f"  Error saving score: {save_error}")
@@ -541,8 +546,8 @@ def call_nn_infill(s, S, use_sampling=True, min_length=10, enc_no_repeat_ngram_s
         ca_result = convert_midi_to_ca_format_with_timing(
             result_midi_path,
             project_measures,
-            measures_to_generate,
-            extra_id_to_measure,
+            bar_mode["bars"],
+            extra_ids_map,
             input_ticks_per_beat=input_ticks_per_beat,
             input_time_signature=input_time_sig
         )
@@ -553,10 +558,7 @@ def call_nn_infill(s, S, use_sampling=True, min_length=10, enc_no_repeat_ngram_s
             pass
         except:
             pass
-        
-        LAST_CALL = s_normalized
-        LAST_OUTPUTS.add(ca_result)
-        
+                
         if DEBUG:
             print(f"\n=== RESULT ===")
             print(f"  CA format: {len(ca_result)} chars")
@@ -573,6 +575,8 @@ def call_nn_infill(s, S, use_sampling=True, min_length=10, enc_no_repeat_ngram_s
         fallback_extra_id = actual_extra_id if 'actual_extra_id' in locals() else 0
         return f";M:0;B:5;L:96;<extra_id_{fallback_extra_id}>N:60;d:240;w:240"
 
+def test():
+    print("Server running!")
 
 def start_server():
     print("="*60)
@@ -584,6 +588,7 @@ def start_server():
     
     server = SimpleXMLRPCServer(('127.0.0.1', PORT), logRequests=DEBUG, allow_none=True)
     server.register_function(call_nn_infill, 'call_nn_infill')
+    server.register_function(test, 'test')
     
     print(f"\nServer ready on port {PORT}")
     print("\nPress Ctrl+C to stop\n")

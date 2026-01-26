@@ -11,10 +11,10 @@ import shutil
 import platform
 from pathlib import Path
 
-VENV_NAME = "venv"
+VENV_NAME = ".venv"
 PYTHON_MIN_VERSION = (3, 9)
 MMM_REPO = "https://github.com/DaoTwenty/MMM.git"
-MMM_BRANCH = "cpp_port"
+MMM_BRANCH = "python_complete"
 
 def run_command(cmd, capture_output=False, cwd=None):
     """Run command with proper error handling and shell escaping"""
@@ -38,7 +38,7 @@ def check_python():
     """Check for compatible Python version"""
     print("Checking Python version...")
     
-    python_commands = ["python3.9", "python3", "python"]
+    python_commands = ["python3.12", "python3", "python"]
     
     for cmd in python_commands:
         try:
@@ -176,7 +176,7 @@ def install_project_requirements():
         run_command([pip_cmd, "install", lib])
 
 def clone_mmm():
-    """Clone MMM repository from the cpp_port branch"""
+    """Clone MMM repository"""
     if Path("MMM").exists():
         print("MMM repository already exists")
         try:
@@ -230,8 +230,10 @@ def setup_reaper_integration():
     print(f"Setting up REAPER integration at: {reaper_path}")
     
     project_root = Path.cwd()
-    scripts_src = project_root / "Scripts"
-    effects_src = project_root / "Effects"
+    scripts_src = project_root / "src" / "Scripts"
+    effects_src = project_root / "src" / "Effects"
+
+    print(f"Linking:\n    - {scripts_src}\n    - {effects_src}")
     
     scripts_dst = reaper_path / "Scripts/composers_assistant_v2"
     effects_dst = reaper_path / "Effects/composers_assistant_v2"
@@ -316,10 +318,8 @@ def main():
         
         setup_venv(python_cmd)
         install_core_dependencies(has_cuda)
-        install_project_requirements()
+        install_project_requirements()       
 
-        install_rust_macos()
-        
         clone_mmm()
         midi_success = build_mmm()
         
@@ -329,7 +329,7 @@ def main():
         print_completion_message()
         
         if not midi_success:
-            print("\nNote: MMM build may require manual completion")
+            print("\nNote: MMM build failed")
             sys.exit(1)
             
     except KeyboardInterrupt:

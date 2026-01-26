@@ -5,6 +5,7 @@ Handles parameter reading and server communication
 
 import sys
 import os
+import json
 
 import mytrackviewstuff as mt
 import mymidistuff as mm
@@ -247,7 +248,7 @@ def get_mmm_track_options_by_track_idx() -> dict:
                 opts.low_note_loose = int(RPR_TrackFX_GetParam(t, fx_loc, 9 + loc_offset, 0, 0)[0])
                 opts.high_note_loose = int(RPR_TrackFX_GetParam(t, fx_loc, 10 + loc_offset, 0, 0)[0])
                 
-                res[i] = opts
+                res[str(i)] = opts
                 
                 if DEBUG:
                     print(f"Track {i} options: vert={opts.vert_density}, horiz={opts.horiz_density}")
@@ -295,8 +296,7 @@ def convert_track_options_to_control_strings(opts: MMMTrackOptionsObj) -> list:
     return controls
 
 
-def call_nn_infill(s, S, use_sampling=True, min_length=10, enc_no_repeat_ngram_size=0, 
-                   has_fully_masked_inst=False, temperature=1.0, start_measure=None, end_measure=None):
+def call_nn_infill(S, masks, extra_ids_map, temperature=1.0, start_measure=None, end_measure=None):
     """
     Call the MMM server via XML-RPC
     Uses parameters passed to function, supplementing with global options for MMM-specific params
@@ -305,6 +305,7 @@ def call_nn_infill(s, S, use_sampling=True, min_length=10, enc_no_repeat_ngram_s
     import xmlrpc.client
     
     print(f"\ncall_nn_infill called with temperature={temperature}")
+    
     
     try:
         proxy = ServerProxy('http://127.0.0.1:3456')
@@ -327,24 +328,27 @@ def call_nn_infill(s, S, use_sampling=True, min_length=10, enc_no_repeat_ngram_s
             'shuffle': options.shuffle,
             'sampling_seed': options.sampling_seed,
             'mask_top_k': options.mask_top_k,
-            'polyphony_hard_limit': options.polyphony_hard_limit,
-            'track_options': track_options
+            'polyphony_hard_limit': options.polyphony_hard_limit
         }
         
-        print(f"Sending to server: {options_dict}")
+        print("S",json.dumps(pre.encode_midisongbymeasure_to_save_dict(S), indent=4))
+        print(start_measure, end_measure)
+
         
         res = proxy.call_nn_infill(
-            s, 
             pre.encode_midisongbymeasure_to_save_dict(S), 
-            use_sampling, 
-            min_length, 
-            enc_no_repeat_ngram_size, 
-            has_fully_masked_inst, 
+            masks,
+            extra_ids_map,
             options_dict,
             start_measure, 
             end_measure
         )
+        
+
+        print("Returning generation")
         return res
+        
+        
     except xmlrpc.client.Fault as e:
         print('Exception raised by MMM server:')
         print(str(e))
@@ -352,4 +356,5 @@ def call_nn_infill(s, S, use_sampling=True, min_length=10, enc_no_repeat_ngram_s
     except Exception as e:
         print('MMM server connection failed. Make sure mmm_nn_server.py is running on port 3456.')
         print(f'Error: {e}')
-        raise
+        return
+    

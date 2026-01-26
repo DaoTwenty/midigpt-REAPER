@@ -57,7 +57,7 @@ class MyNote(object):
 
     def __repr__(self):
         # return 'Note:' + ','.join(mf.tostr([self.noteidx, self.pitch, self.vel, self.chan, self.startQN, self.endQN, self.startppqpos, self.endppqpos, self.selected, self.muted]))
-        return 'N:{}, vel:{}, chan:{}, startQN:{}, endQN:{}, startppq:{}, endppq:{}, sel:{}, muted:{}'.format(
+        return '[N:{}, vel:{}, chan:{}, startQN:{}, endQN:{}, startppq:{}, endppq:{}, sel:{}, muted:{}]'.format(
             self.pitch, self.vel, self.chan, self.startQN, self.endQN, self.startppqpos, self.endppqpos, self.selected, self.muted)
 
     def __hash__(self):
