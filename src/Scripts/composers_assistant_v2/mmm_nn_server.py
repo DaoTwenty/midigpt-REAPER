@@ -10,7 +10,8 @@ from collections import defaultdict
 
 from transformers import (
     AutoModelForCausalLM,
-    GenerationConfig
+    GenerationConfig,
+    set_seed
 )
 from miditok import MMM
 from miditok.utils import get_bars_ticks
@@ -324,15 +325,20 @@ def convert_midi_to_ca_format_with_timing(midi_path, project_measures, bars_to_g
 
 
 def call_nn_infill(S, masks, extra_ids_map, options_dict=None, start_measure=None, end_measure=None):
-    
+
     if options_dict is None:
         options_dict = {}
     
     temperature = options_dict.get('temperature', 1.0)
     model_dim = options_dict.get('model_dim', 4)
-    max_steps = options_dict.get('max_steps', 200)
-    shuffle = options_dict.get('shuffle', False)
     sampling_seed = options_dict.get('sampling_seed', -1)
+    top_k = options_dict.get('mask_top_k', None)
+    top_p = options_dict.get('mask_top_p', None)
+    max_new_tokens = options_dict.get('max_new_tokens', 1024)
+    repitition_penalty = options_dict.get('repitition_penalty', 1.2)
+
+    if sampling_seed != -1:
+        set_seed(sampling_seed)
     
     if temperature < 0.5:
         temperature = 0.5
@@ -344,8 +350,6 @@ def call_nn_infill(S, masks, extra_ids_map, options_dict=None, start_measure=Non
         print('MMM CALL_NN_INFILL')
         print(f"  Temperature: {temperature}")
         print(f"  Model dim: {model_dim}")
-        print(f"  Max steps: {max_steps}")
-        print(f"  Shuffle: {shuffle}")
     
     try:
         if not MMM_AVAILABLE or MODEL is None or TOKENIZER is None:
@@ -393,6 +397,7 @@ def call_nn_infill(S, masks, extra_ids_map, options_dict=None, start_measure=Non
                     break
         
         score_obj = Score(temp_midi_path)
+        #return ";M:0;B:5;L:96;<extra_id_0>N:60;d:240;w:240"
 
         # Remove time signatures and tempos occurring after the start of the last note
         max_note_time = 0
@@ -461,12 +466,12 @@ def call_nn_infill(S, masks, extra_ids_map, options_dict=None, start_measure=Non
         
         gen_cfg = GenerationConfig(
             do_sample=True,
-            max_new_tokens=1024,
-            repetition_penalty=1.2,
+            max_new_tokens=max_new_tokens,
+            repetition_penalty=repitition_penalty,
             temperature=temperature,
             num_beams=1,
-            top_k=20,
-            top_p=0.95,
+            top_k=top_k,
+            top_p=top_p,
             epsilon_cutoff=None,
             eta_cutoff=None
         )

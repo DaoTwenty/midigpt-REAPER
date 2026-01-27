@@ -4,28 +4,10 @@ slider1:jsfx_id=54964318<54964318, 54964318, 1>-jsfx_id
 
 // Core generation parameters
 slider10:temperature=1.0<0.5, 2.0, 0.1>Temperature
-slider11:tracks_per_step=1<1, 8, 1>Tracks per Step
-slider12:bars_per_step=1<1, 4, 1>Bars per Step
-slider13:model_dim=4<2, 8, 1>Model Dimension
-slider14:percentage=100<10, 100, 5>Generation Percentage
-slider15:max_steps=200<50, 1000, 10>Max Steps
-slider16:batch_size=1<1, 4, 1>Batch Size
-slider17:shuffle=1<0, 1, 1{No,Yes}>Shuffle Steps
-slider18:sampling_seed=-1<-1, 9999, 1>Sampling Seed (-1 = random)
-slider19:mask_top_k=0<0, 50, 1>Mask Top K (0 = disabled)
-slider20:polyphony_hard_limit=6<1, 16, 1>Polyphony Hard Limit
-
-// CA-compatible options (not used by MidiGPT but kept for script compatibility)
-slider30:rhy_cond=0<0, 2, 1{Do Not Preserve Rhythm,Preserve Rhythm,Preserve Rhythm and number of Pitches and number of Pitch Classes}>Preserve Rhythm in Selected Items
-slider31:do_note_range_cond=0<0, 2, 1{Do Not Preserve Pitch Range,Yes (Loose),Yes (Strict)}>Preserve Pitch Range in Each Sel Tr Measure
-slider32:no_rep_n_gram_size=0<0, 10, 1>N-Gram Size for No Rep Script
-slider33:variation_alg=0<0, 2, 1{Random Rewriting,Measure-Based Rewriting,Track-Based Rewriting}>Algorithm for Variation Writing Script
-
-// UI flags
-slider40:disp_tr_to_midi_inst=1<0, 1, 1{No,Yes}>Display Track-to-MIDI Instrument
-slider41:gen_notes_selected=1<0, 1, 1{No,Yes}>Generated Notes are Selected
-slider42:display_warnings=1<0, 1, 1{No,Yes}>Display Warnings
-slider43:verbose=0<0, 1, 1{No,Yes}>Verbose Output
+slider11:model_dim=4<2, 8, 1>Model Dimension
+slider12:sampling_seed=-1<-1, 9999, 1>Sampling Seed (-1 = random)
+slider13:mask_top_k=0<0, 50, 1>Top K (0 = disabled)
+slider14:mask_top_p=0<0, 0.99, 0.01>Top P (0 = disabled)
 
 in_pin:none
 out_pin:none
@@ -33,18 +15,12 @@ out_pin:none
 @init
 // Store previous values for validation
 temp_prev = temperature;
-tps_prev = tracks_per_step;
-bps_prev = bars_per_step;
 md_prev = model_dim;
 
 @slider
 // Validate parameter relationships
 model_dim < bars_per_step ? (
   model_dim = bars_per_step;
-);
-
-bars_per_step > model_dim ? (
-  bars_per_step = model_dim;
 );
 
 // Enforce temperature range [0.5, 2.0] - MidiGPT requirement
@@ -58,6 +34,4 @@ temperature > 2.0 ? (
 
 // Store current values
 temp_prev = temperature;
-tps_prev = tracks_per_step;
-bps_prev = bars_per_step;
 md_prev = model_dim;

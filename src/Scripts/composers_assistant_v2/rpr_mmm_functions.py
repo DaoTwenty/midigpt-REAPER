@@ -80,6 +80,7 @@ def get_global_options():
     options.shuffle = True
     options.sampling_seed = -1
     options.mask_top_k = 0
+    options.mask_top_p = 0
     options.polyphony_hard_limit = 6
     
     # CA-compatible options (used by REAPER scripts but not by MMM)
@@ -112,67 +113,18 @@ def get_global_options():
         # slider10-20 map to parameters 1-11
         val, _, _, _, _, _ = RPR_TrackFX_GetParam(master, fx_loc, 0 + loc_offset, 0, 0)
         options.temperature = val
-        print(f"  Temperature: {options.temperature:.3f}")
         
         val, _, _, _, _, _ = RPR_TrackFX_GetParam(master, fx_loc, 1 + loc_offset, 0, 0)
-        options.tracks_per_step = int(val)
-        print(f"  Tracks per step: {options.tracks_per_step}")
-        
-        val, _, _, _, _, _ = RPR_TrackFX_GetParam(master, fx_loc, 2 + loc_offset, 0, 0)
-        options.bars_per_step = int(val)
-        
-        val, _, _, _, _, _ = RPR_TrackFX_GetParam(master, fx_loc, 3 + loc_offset, 0, 0)
         options.model_dim = int(val)
-        print(f"  Model dim: {options.model_dim}")
-        
-        val, _, _, _, _, _ = RPR_TrackFX_GetParam(master, fx_loc, 4 + loc_offset, 0, 0)
-        options.percentage = int(val)
-        
-        val, _, _, _, _, _ = RPR_TrackFX_GetParam(master, fx_loc, 5 + loc_offset, 0, 0)
-        options.max_steps = int(val)
-        
-        val, _, _, _, _, _ = RPR_TrackFX_GetParam(master, fx_loc, 6 + loc_offset, 0, 0)
-        options.batch_size = int(val)
-        
-        val, _, _, _, _, _ = RPR_TrackFX_GetParam(master, fx_loc, 7 + loc_offset, 0, 0)
-        options.shuffle = bool(val)
-        
-        val, _, _, _, _, _ = RPR_TrackFX_GetParam(master, fx_loc, 8 + loc_offset, 0, 0)
+            
+        val, _, _, _, _, _ = RPR_TrackFX_GetParam(master, fx_loc, 2 + loc_offset, 0, 0)
         options.sampling_seed = int(val)
         
-        val, _, _, _, _, _ = RPR_TrackFX_GetParam(master, fx_loc, 9 + loc_offset, 0, 0)
+        val, _, _, _, _, _ = RPR_TrackFX_GetParam(master, fx_loc, 3 + loc_offset, 0, 0)
         options.mask_top_k = int(val)
         
-        val, _, _, _, _, _ = RPR_TrackFX_GetParam(master, fx_loc, 10 + loc_offset, 0, 0)
-        options.polyphony_hard_limit = int(val)
-        
-        # CA-compatible parameters
-        # slider30-33 map to parameters 12-15
-        val, _, _, _, _, _ = RPR_TrackFX_GetParam(master, fx_loc, 11 + loc_offset, 0, 0)
-        options.rhy_cond = int(val)
-        
-        val, _, _, _, _, _ = RPR_TrackFX_GetParam(master, fx_loc, 12 + loc_offset, 0, 0)
-        options.do_note_range_cond = int(val)
-        
-        val, _, _, _, _, _ = RPR_TrackFX_GetParam(master, fx_loc, 13 + loc_offset, 0, 0)
-        options.enc_no_repeat_ngram_size = int(val)
-        
-        val, _, _, _, _, _ = RPR_TrackFX_GetParam(master, fx_loc, 14 + loc_offset, 0, 0)
-        options.variation_alg = int(val)
-        
-        # UI flags
-        # slider40-43 map to parameters 16-19
-        val, _, _, _, _, _ = RPR_TrackFX_GetParam(master, fx_loc, 15 + loc_offset, 0, 0)
-        options.disp_tr_to_midi_inst = bool(val)
-        
-        val, _, _, _, _, _ = RPR_TrackFX_GetParam(master, fx_loc, 16 + loc_offset, 0, 0)
-        options.gen_notes_are_selected = bool(val)
-        
-        val, _, _, _, _, _ = RPR_TrackFX_GetParam(master, fx_loc, 17 + loc_offset, 0, 0)
-        options.display_warnings = bool(val)
-        
-        val, _, _, _, _, _ = RPR_TrackFX_GetParam(master, fx_loc, 18 + loc_offset, 0, 0)
-        options.verbose = bool(val)
+        val, _, _, _, _, _ = RPR_TrackFX_GetParam(master, fx_loc, 4 + loc_offset, 0, 0)
+        options.mask_top_p = float(val)
     
     except Exception as e:
         print(f"Warning: Could not read global options: {e}")
@@ -319,21 +271,11 @@ def call_nn_infill(S, masks, extra_ids_map, temperature=1.0, start_measure=None,
         # Build options dict using passed parameters where available
         options_dict = {
             'temperature': temperature,  # Use passed parameter, not options.temperature
-            'tracks_per_step': options.tracks_per_step,
-            'bars_per_step': options.bars_per_step,
             'model_dim': options.model_dim,
-            'percentage': options.percentage,
-            'max_steps': options.max_steps,
-            'batch_size': options.batch_size,
-            'shuffle': options.shuffle,
             'sampling_seed': options.sampling_seed,
             'mask_top_k': options.mask_top_k,
-            'polyphony_hard_limit': options.polyphony_hard_limit
+            'mask_top_p': options.mask_top_p,
         }
-        
-        print("S",json.dumps(pre.encode_midisongbymeasure_to_save_dict(S), indent=4))
-        print(start_measure, end_measure)
-
         
         res = proxy.call_nn_infill(
             pre.encode_midisongbymeasure_to_save_dict(S), 
