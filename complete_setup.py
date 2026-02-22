@@ -235,8 +235,8 @@ def setup_reaper_integration():
 
     print(f"Linking:\n    - {scripts_src}\n    - {effects_src}")
     
-    scripts_dst = reaper_path / "Scripts/composers_assistant_v2"
-    effects_dst = reaper_path / "Effects/composers_assistant_v2"
+    scripts_dst = reaper_path / "Scripts/MMM"
+    effects_dst = reaper_path / "Effects/MMM"
     
     if scripts_src.exists():
         if scripts_dst.exists():
@@ -313,24 +313,24 @@ def main():
     print("=" * 50)
     
     try:
-        python_cmd = check_python()
-        has_cuda = check_cuda()
+        #python_cmd = check_python()
+        #has_cuda = check_cuda()
         
-        setup_venv(python_cmd)
-        install_core_dependencies(has_cuda)
-        install_project_requirements()       
+        #setup_venv(python_cmd)
+        #install_core_dependencies(has_cuda)
+        #install_project_requirements()       
 
-        clone_mmm()
-        midi_success = build_mmm()
+        #clone_mmm()
+        #midi_success = build_mmm()
         
         setup_reaper_integration()
-        download_models()
-        verify_installation()
-        print_completion_message()
+        #download_models()
+        #verify_installation()
+        #print_completion_message()
         
-        if not midi_success:
-            print("\nNote: MMM build failed")
-            sys.exit(1)
+        #if not midi_success:
+        #    print("\nNote: MMM build failed")
+        #    sys.exit(1)
             
     except KeyboardInterrupt:
         print("\nSetup interrupted by user")
