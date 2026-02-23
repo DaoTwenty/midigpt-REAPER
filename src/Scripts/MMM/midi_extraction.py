@@ -510,15 +510,16 @@ class REAPERMIDIExtractor:
                 self.tempo_map.add_time_signature(timepos, timesig_num, timesig_denom)
     
     def _get_midi_tracks_with_info(self) -> List[TrackInfo]:
-        """Get list of tracks containing MIDI items with instrument info"""
+        """Get list of tracks that have at least one MIDI item (even if empty)."""
         track_info_list = []
         num_tracks = RPR_CountTracks(0)
         
         for i in range(num_tracks):
             track = RPR_GetTrack(0, i)
             
-            # Check if track has MIDI items
-            has_midi = False
+            # Include the track if it has at least one MIDI item (notes not required).
+            # This ensures empty tracks selected for infill are present in the song dict.
+            has_midi_item = False
             num_items = RPR_CountTrackMediaItems(track)
             
             for j in range(num_items):
@@ -526,10 +527,10 @@ class REAPERMIDIExtractor:
                 take = RPR_GetActiveTake(item)
                 
                 if take and RPR_TakeIsMIDI(take):
-                    has_midi = True
+                    has_midi_item = True
                     break
             
-            if has_midi:
+            if has_midi_item:
                 # Get track name
                 retval, track_obj, flags_out = RPR_GetTrackState(track, 0)
                 track_name = retval if retval else f"Track {i+1}"
