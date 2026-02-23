@@ -8,4 +8,9 @@ src/Scripts/composers_assistant_v2/models_permuted_labels/
 /MIDI-GPT
 /venv
 /MMM
-/models
+**/models
+/.venv
+*.zip
+*.xml
+*.html
+/tests
