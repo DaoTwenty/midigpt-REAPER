@@ -150,10 +150,21 @@ if [ "$SKIP_DEPS" = false ]; then
     fi
 
     # -- protoc (protobuf compiler) --
+    # mmm_refactored requires protobuf v21 (aka 3.21.x). Newer versions (v22+)
+    # changed the C++ API (string_view instead of string) and break the build.
+    NEED_PROTOBUF21=false
     if check_cmd protoc; then
-        ok "protoc $(protoc --version | awk '{print $2}')"
+        PROTOC_VER="$(protoc --version | awk '{print $2}')"
+        PROTOC_MAJOR="${PROTOC_VER%%.*}"
+        if [ "$PROTOC_MAJOR" -ge 22 ] 2>/dev/null || [ "$PROTOC_MAJOR" -ge 4 ] 2>/dev/null; then
+            warn "protoc $PROTOC_VER found, but mmm_refactored requires protobuf v21"
+            NEED_PROTOBUF21=true
+        else
+            ok "protoc $PROTOC_VER"
+        fi
     else
         MISSING+=("protobuf")
+        NEED_PROTOBUF21=true
         warn "protoc not found"
     fi
 
@@ -234,6 +245,22 @@ if [ "$SKIP_DEPS" = false ]; then
             echo ""
             fail "Please install missing dependencies and re-run"
         fi
+    fi
+
+    # -- Ensure protobuf@21 is available (even if a newer protoc exists) --
+    if [ "$NEED_PROTOBUF21" = true ] && [ "$PLATFORM" = "macos" ] && check_cmd brew; then
+        if [ ! -d "/opt/homebrew/opt/protobuf@21" ] && [ ! -d "/usr/local/opt/protobuf@21" ]; then
+            info "Installing protobuf@21 via Homebrew (required for mmm_refactored)..."
+            brew install protobuf@21 || fail "Failed to install protobuf@21"
+        fi
+        for prefix in /opt/homebrew/opt/protobuf@21 /usr/local/opt/protobuf@21; do
+            if [ -d "$prefix" ]; then
+                export PATH="$prefix/bin:$PATH"
+                export PKG_CONFIG_PATH="$prefix/lib/pkgconfig:${PKG_CONFIG_PATH:-}"
+                info "protobuf@21 at $prefix added to PATH"
+                break
+            fi
+        done
     fi
 
     [ -z "$PYTHON_CMD" ] && fail "Python >= $PYTHON_MIN_VERSION required but not found"
