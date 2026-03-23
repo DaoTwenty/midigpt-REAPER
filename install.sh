@@ -122,7 +122,7 @@ if [ "$SKIP_DEPS" = false ]; then
 
     # -- Python --
     PYTHON_CMD=""
-    for cmd in python3.14 python3.13 python3.12 python3.11 python3.10 python3; do
+    for cmd in python3.13 python3.12 python3.11 python3.10 python3; do
         if check_cmd "$cmd"; then
             PY_VER="$($cmd -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
             PY_MAJOR="$($cmd -c 'import sys; print(sys.version_info.major)')"
@@ -177,7 +177,7 @@ if [ "$SKIP_DEPS" = false ]; then
                 BREW_PKGS=()
                 for dep in "${MISSING[@]}"; do
                     case "$dep" in
-                        "python>=3.10") BREW_PKGS+=("python@3.14") ;;
+                        "python>=3.10") BREW_PKGS+=("python@3.13") ;;
                         "cmake")        BREW_PKGS+=("cmake") ;;
                         "protobuf")     BREW_PKGS+=("protobuf@21") ;;
                         "git")          BREW_PKGS+=("git") ;;
@@ -200,7 +200,7 @@ if [ "$SKIP_DEPS" = false ]; then
 
                 # Re-detect python after install
                 if [ -z "$PYTHON_CMD" ]; then
-                    for cmd in python3.14 python3.13 python3.12 python3.11 python3.10 python3; do
+                    for cmd in python3.13 python3.12 python3.11 python3.10 python3; do
                         if check_cmd "$cmd"; then
                             PY_VER="$($cmd -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
                             PY_MINOR="$($cmd -c 'import sys; print(sys.version_info.minor)')"
@@ -243,7 +243,7 @@ else
     step "Step 1/6: Skipping dependency check (--skip-deps)"
     # Find python anyway
     PYTHON_CMD=""
-    for cmd in python3.14 python3.13 python3.12 python3.11 python3.10 python3; do
+    for cmd in python3.13 python3.12 python3.11 python3.10 python3; do
         if check_cmd "$cmd"; then
             PY_MINOR="$($cmd -c 'import sys; print(sys.version_info.minor)')"
             if [ "$PY_MINOR" -ge 10 ]; then
