@@ -8,10 +8,27 @@ src/Scripts/composers_assistant_v2/models_permuted_labels/
 /MIDI-GPT
 /venv
 /MMM
-**/models
+# Model weights and training artifacts
+*.pt
+*.pth
+*.safetensors
+*.bin
+**/trainer_state.json
+**/generation_config.json
+/models
+
 /.venv
 *.zip
 *.xml
 *.html
-/tests
 /tmp
+
+# Dev / CI artifacts
+.claude/
+.dockerignore
+.pytest_cache/
+__pycache__/
+*.egg-info/
+/src/MIDIGPT_Reaper.egg-info/
+/src/Scripts/MMM/debug_dumps/
+=2.0

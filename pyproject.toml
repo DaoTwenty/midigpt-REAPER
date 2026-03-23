@@ -1,15 +1,15 @@
 
 [project]
-name = "MMM-Reaper"
-version = "0.0.1"
-description = "Multitrack Machine Machine REAPER plugin"
+name = "MIDIGPT-Reaper"
+version = "0.1.0"
+description = "MIDI-GPT REAPER plugin"
 readme = {file = "README.md", content-type = "text/markdown"}
 license = {file = "LICENSE"}
-requires-python = ">=3.10.0"
+requires-python = ">=3.9.0"
 authors = [
     { name = "Paul Triana" }
 ]
 
 dependencies = [
-    "mmm @ git+ssh://git@github.com:DaoTwenty/Multitrack-Music-Machine.git@dev"
+    "symusic",
 ]
