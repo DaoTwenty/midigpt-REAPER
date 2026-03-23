@@ -122,7 +122,7 @@ if [ "$SKIP_DEPS" = false ]; then
 
     # -- Python --
     PYTHON_CMD=""
-    for cmd in python3.13 python3.12 python3.11 python3.10 python3; do
+    for cmd in python3.12 python3.11 python3.10 python3; do
         if check_cmd "$cmd"; then
             PY_VER="$($cmd -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
             PY_MAJOR="$($cmd -c 'import sys; print(sys.version_info.major)')"
@@ -177,7 +177,7 @@ if [ "$SKIP_DEPS" = false ]; then
                 BREW_PKGS=()
                 for dep in "${MISSING[@]}"; do
                     case "$dep" in
-                        "python>=3.10") BREW_PKGS+=("python@3.13") ;;
+                        "python>=3.10") BREW_PKGS+=("python@3.12") ;;
                         "cmake")        BREW_PKGS+=("cmake") ;;
                         "protobuf")     BREW_PKGS+=("protobuf@21") ;;
                         "git")          BREW_PKGS+=("git") ;;
@@ -200,7 +200,7 @@ if [ "$SKIP_DEPS" = false ]; then
 
                 # Re-detect python after install
                 if [ -z "$PYTHON_CMD" ]; then
-                    for cmd in python3.13 python3.12 python3.11 python3.10 python3; do
+                    for cmd in python3.12 python3.11 python3.10 python3; do
                         if check_cmd "$cmd"; then
                             PY_VER="$($cmd -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
                             PY_MINOR="$($cmd -c 'import sys; print(sys.version_info.minor)')"
@@ -243,7 +243,7 @@ else
     step "Step 1/6: Skipping dependency check (--skip-deps)"
     # Find python anyway
     PYTHON_CMD=""
-    for cmd in python3.13 python3.12 python3.11 python3.10 python3; do
+    for cmd in python3.12 python3.11 python3.10 python3; do
         if check_cmd "$cmd"; then
             PY_MINOR="$($cmd -c 'import sys; print(sys.version_info.minor)')"
             if [ "$PY_MINOR" -ge 10 ]; then
@@ -280,15 +280,10 @@ if python -c "import torch" 2>/dev/null; then
     ok "PyTorch $TORCH_VER already installed"
 else
     info "Installing PyTorch (this may take a few minutes)..."
-    ARCH="$(uname -m)"
-    if [ "$PLATFORM" = "macos" ] && [ "$ARCH" = "x86_64" ]; then
-        # Intel Macs: PyTorch no longer publishes default wheels for macOS x86_64
-        info "Intel Mac detected — installing PyTorch from CPU index..."
-        pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-    elif [ "$PLATFORM" = "linux" ]; then
-        pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+    if [ "$PLATFORM" = "linux" ]; then
+        pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
     else
-        pip3 install torch torchvision
+        pip install torch
     fi
     if python -c "import torch" 2>/dev/null; then
         TORCH_VER="$(python -c 'import torch; print(torch.__version__)')"
