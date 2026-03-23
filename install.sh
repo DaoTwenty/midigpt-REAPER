@@ -280,10 +280,15 @@ if python -c "import torch" 2>/dev/null; then
     ok "PyTorch $TORCH_VER already installed"
 else
     info "Installing PyTorch (this may take a few minutes)..."
-    if [ "$PLATFORM" = "linux" ]; then
-        pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cpu -q 2>/dev/null
+    ARCH="$(uname -m)"
+    if [ "$PLATFORM" = "macos" ] && [ "$ARCH" = "x86_64" ]; then
+        # Intel Macs: PyTorch no longer publishes default wheels for macOS x86_64
+        info "Intel Mac detected — installing PyTorch from CPU index..."
+        pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+    elif [ "$PLATFORM" = "linux" ]; then
+        pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cpu
     else
-        pip3 install torch torchvision -q 2>/dev/null
+        pip3 install torch torchvision
     fi
     if python -c "import torch" 2>/dev/null; then
         TORCH_VER="$(python -c 'import torch; print(torch.__version__)')"
