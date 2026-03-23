@@ -1,9 +1,9 @@
 """
-mmm_server.py  --  Async job-queue inference server for MMM
+MMM_server.py  --  Async job-queue inference server using mmm_refactored
 
-Model is set via model_config.json at startup (active_model field).
-No runtime model switching. The client calls get_model_schema() on each
-run to get the AC schema + track_fx_id for the active model.
+Uses the mmm_refactored C++ extension for inference via sample_multi_step().
+Model checkpoint is set via model_config.json at startup.
+No runtime model switching.
 """
 
 import os
@@ -12,19 +12,13 @@ import uuid
 import threading
 import time
 import json
+import tempfile
 import traceback
 from collections import defaultdict, deque
 from xmlrpc.server import SimpleXMLRPCServer
 
-import torch
-import time
-from transformers import set_seed
-from symusic import Score
-
-from mmm.core.baseline import MMM
-from mmm.inference.generate import generate
-from mmm.inference.config import InferenceConfig, HyperParam
-from mmm.core.config import MMMGenerationConfig, MMMConfig
+from symusic import Score, Track, Note, Tempo, TimeSignature
+import mmm_refactored
 
 
 # ---------------------------------------------------------------------------
@@ -35,17 +29,21 @@ PORT        = 3456
 DEBUG       = True
 MAX_WORKERS = 1
 
-MODEL_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "model_config.json")
+MODEL_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "models", "config.json")
+
+# Debug: save intermediate MIDI/JSON files for inspection.
+# Set to a directory path to enable, or None to disable.
+DEBUG_DUMP_DIR = None
 
 # ---------------------------------------------------------------------------
 # Model globals
 # ---------------------------------------------------------------------------
 
-MMM_MODEL:      MMM  = None
-DEVICE               = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-MODEL_READY          = False
-ACTIVE_MODEL_ID: str = None
-ACTIVE_MODEL_ENTRY: dict = {}   # the full entry from model_config.json
+ENCODER: mmm_refactored.ElVelocityDurationPolyphonyYellowEncoder = None
+CKPT_PATH:   str  = None
+MODEL_READY        = False
+MODEL_LABEL: str  = ""
+MODEL_CONFIG: dict = {}
 
 
 # ---------------------------------------------------------------------------
@@ -58,6 +56,53 @@ def _log(msg: str):
 
 
 # ---------------------------------------------------------------------------
+# GM instrument mapping  (MIDI program 0-127 → midigpt GM_TYPE string)
+# ---------------------------------------------------------------------------
+
+GM_PROGRAM_TO_TYPE = [
+    'acoustic_grand_piano', 'bright_acoustic_piano', 'electric_grand_piano',
+    'honky_tonk_piano', 'electric_piano_1', 'electric_piano_2', 'harpsichord',
+    'clavi', 'celesta', 'glockenspiel', 'music_box', 'vibraphone', 'marimba',
+    'xylophone', 'tubular_bells', 'dulcimer', 'drawbar_organ',
+    'percussive_organ', 'rock_organ', 'church_organ', 'reed_organ',
+    'accordion', 'harmonica', 'tango_accordion', 'acoustic_guitar_nylon',
+    'acoustic_guitar_steel', 'electric_guitar_jazz', 'electric_guitar_clean',
+    'electric_guitar_muted', 'overdriven_guitar', 'distortion_guitar',
+    'guitar_harmonics', 'acoustic_bass', 'electric_bass_finger',
+    'electric_bass_pick', 'fretless_bass', 'slap_bass_1', 'slap_bass_2',
+    'synth_bass_1', 'synth_bass_2', 'violin', 'viola', 'cello', 'contrabass',
+    'tremolo_strings', 'pizzicato_strings', 'orchestral_harp', 'timpani',
+    'string_ensemble_1', 'string_ensemble_2', 'synth_strings_1',
+    'synth_strings_2', 'choir_aahs', 'voice_oohs', 'synth_voice',
+    'orchestra_hit', 'trumpet', 'trombone', 'tuba', 'muted_trumpet',
+    'french_horn', 'brass_section', 'synth_brass_1', 'synth_brass_2',
+    'soprano_sax', 'alto_sax', 'tenor_sax', 'baritone_sax', 'oboe',
+    'english_horn', 'bassoon', 'clarinet', 'piccolo', 'flute', 'recorder',
+    'pan_flute', 'blown_bottle', 'shakuhachi', 'whistle', 'ocarina',
+    'lead_1_square', 'lead_2_sawtooth', 'lead_3_calliope', 'lead_4_chiff',
+    'lead_5_charang', 'lead_6_voice', 'lead_7_fifths', 'lead_8_bass__lead',
+    'pad_1_new_age', 'pad_2_warm', 'pad_3_polysynth', 'pad_4_choir',
+    'pad_5_bowed', 'pad_6_metallic', 'pad_7_halo', 'pad_8_sweep',
+    'fx_1_rain', 'fx_2_soundtrack', 'fx_3_crystal', 'fx_4_atmosphere',
+    'fx_5_brightness', 'fx_6_goblins', 'fx_7_echoes', 'fx_8_sci_fi',
+    'sitar', 'banjo', 'shamisen', 'koto', 'kalimba', 'bag_pipe', 'fiddle',
+    'shanai', 'tinkle_bell', 'agogo', 'steel_drums', 'woodblock',
+    'taiko_drum', 'melodic_tom', 'synth_drum', 'reverse_cymbal',
+    'guitar_fret_noise', 'breath_noise', 'seashore', 'bird_tweet',
+    'telephone_ring', 'helicopter', 'applause', 'gunshot',
+]
+
+
+def _gm_program_to_type(program: int, is_drum: bool) -> str:
+    """Convert MIDI program number to GM_TYPE string name."""
+    if is_drum:
+        return 'drums'
+    if 0 <= program < len(GM_PROGRAM_TO_TYPE):
+        return GM_PROGRAM_TO_TYPE[program]
+    return 'acoustic_grand_piano'
+
+
+# ---------------------------------------------------------------------------
 # model_config.json
 # ---------------------------------------------------------------------------
 
@@ -67,33 +112,39 @@ def _load_model_config() -> dict:
 
 
 def initialize_model(model_config_path: str = None) -> bool:
-    global MMM_MODEL, MODEL_READY, ACTIVE_MODEL_ID, ACTIVE_MODEL_ENTRY, MODEL_CONFIG_PATH
+    global ENCODER, CKPT_PATH, MODEL_READY, MODEL_LABEL, MODEL_CONFIG
+    global MODEL_CONFIG_PATH
 
     if model_config_path:
         MODEL_CONFIG_PATH = model_config_path
 
     try:
-        cfg      = _load_model_config()
-        model_id = cfg["active_model"]
-        entry    = cfg["models"][model_id]
+        cfg = _load_model_config()
 
-        _log(f"Active model  : {model_id} ({entry.get('label', '')})")
-        _log(f"Config        : {entry['config']}")
-        _log(f"Checkpoint    : {entry['ckpt']}")
+        ckpt = cfg["ckpt"]
+        # Resolve relative paths against config file directory
+        base_dir = os.path.dirname(os.path.abspath(MODEL_CONFIG_PATH))
+        if not os.path.isabs(ckpt):
+            ckpt = os.path.join(base_dir, ckpt)
 
-        mmm_config = MMMConfig.load(entry["config"])
-        MMM_MODEL  = MMM(mmm_config, pretrained=entry["ckpt"])
-        MMM_MODEL.model.to(DEVICE)
+        CKPT_PATH    = ckpt
+        MODEL_LABEL  = cfg.get("label", "MIDI-GPT")
+        MODEL_CONFIG = cfg
 
-        ACTIVE_MODEL_ID    = model_id
-        ACTIVE_MODEL_ENTRY = entry
-        MODEL_READY        = True
+        _log(f"Model  : {MODEL_LABEL}")
+        _log(f"Ckpt   : {CKPT_PATH}")
 
-        _log(f"Model ready on {DEVICE}")
+        if not os.path.exists(CKPT_PATH):
+            _log(f"WARNING: Checkpoint not found at {CKPT_PATH}")
+
+        ENCODER     = mmm_refactored.ElVelocityDurationPolyphonyYellowEncoder()
+        MODEL_READY = True
+
+        _log("Encoder initialized, model ready")
         return True
 
     except Exception as e:
-        _log(f"Model initialization failed: {e}")
+        _log(f"Initialization failed: {e}")
         traceback.print_exc()
         return False
 
@@ -103,34 +154,35 @@ def initialize_model(model_config_path: str = None) -> bool:
 # ---------------------------------------------------------------------------
 
 def get_model_schema() -> dict:
-    """
-    Returns everything the client needs to read track attribute controls:
-      - ac_schema     : list of param defs (ac_key, label, min, max, default, format)
-      - track_fx_id   : the jsfx_id sentinel the client should look for on tracks
-      - model_id      : active model identifier
-      - model_label   : human-readable label
-    """
+    """Returns AC schema + track_fx_id for the active model."""
     if not MODEL_READY:
         return {"ok": False, "error": "Model not loaded"}
 
     return {
         "ok":          True,
-        "model_id":    ACTIVE_MODEL_ID,
-        "model_label": ACTIVE_MODEL_ENTRY.get("label", ACTIVE_MODEL_ID),
-        "track_fx_id": ACTIVE_MODEL_ENTRY.get("track_fx_id", 0),
-        "ac_schema":   ACTIVE_MODEL_ENTRY.get("ac_schema", []),
+        "model_id":    "mmm_refactored",
+        "model_label": MODEL_LABEL,
+        "track_fx_id": MODEL_CONFIG.get("track_fx_id", 0),
+        "ac_schema":   MODEL_CONFIG.get("ac_schema", []),
     }
 
 
 # ---------------------------------------------------------------------------
-# MIDI conversion
+# MIDI conversion  (song_dict → symusic Score)
 # ---------------------------------------------------------------------------
 
-def midisong_dict_to_score(song_dict: dict) -> Score:
-    from symusic import Score, Track, Note, Tempo, TimeSignature
+def midisong_dict_to_score(song_dict: dict,
+                           keep_alive_tracks: set = None) -> Score:
+    """Convert song_dict to symusic Score.
 
+    keep_alive_tracks: set of REAPER track indices that MUST survive the MIDI
+        roundtrip even if they have no notes (e.g. empty AR tracks).  A silent
+        placeholder note is added so the encoder doesn't drop them.
+    """
     TPQ   = 480
     score = Score(TPQ, ttype="tick")
+    if keep_alive_tracks is None:
+        keep_alive_tracks = set()
 
     track_info_list = song_dict.get("track_info", [])
     all_measures    = song_dict.get("measures", [])
@@ -199,12 +251,93 @@ def midisong_dict_to_score(song_dict: dict) -> Score:
                     pitch=int(note_dict["pitch"]), velocity=int(note_dict["velocity"]),
                 ))
 
+        # If this track is empty but must survive the MIDI roundtrip
+        # (e.g. empty AR track), add a silent placeholder note so the
+        # encoder doesn't drop it.  Velocity=1 at tick 0, duration=1.
+        if not symusic_track.notes and track_idx in keep_alive_tracks:
+            symusic_track.notes.append(Note(
+                time=0, duration=1,
+                pitch=60, velocity=1,
+            ))
+            _log(f"  Added placeholder note for empty track {track_idx}")
+
         score.tracks.append(symusic_track)
 
     score.sort(inplace=True)
     _log(f"Score: {len(score.tracks)} tracks, "
          f"{sum(len(t.notes) for t in score.tracks)} notes")
     return score
+
+
+# ---------------------------------------------------------------------------
+# Result extraction  (symusic Score → result dict)
+# ---------------------------------------------------------------------------
+
+def _score_to_result_dict(score: Score, masks, start_measure, end_measure,
+                          piece_to_reaper: dict) -> dict:
+    """Extract notes from infilled bars, mapping Piece track indices back
+    to REAPER track indices so the client can write them to the correct tracks.
+
+    Both masks and Piece bars use RELATIVE indices (0-based from start of
+    selection).  The result dict keys are also relative so that
+    write_masked_result can look up measures via song.get_measure().
+    """
+    tpq        = score.tpq
+    masked_set = {(int(t), int(b)) for t, b in masks}
+
+    # Build bar boundary table from time signatures so non-4/4 works.
+    # Each bar's tick-length = numerator / denominator * 4 * tpq.
+    # Time signatures are sorted by time; we walk through bars.
+    ts_list = sorted(score.time_signatures, key=lambda ts: ts.time)
+    # Precompute cumulative bar start ticks.  We need enough bars to cover
+    # all notes.  Start with a generous upper bound.
+    max_tick = max(
+        (n.time + n.duration for t in score.tracks for n in t.notes),
+        default=0,
+    )
+    bar_starts = []   # bar_starts[i] = tick where bar i begins
+    tick = 0
+    ts_idx = 0
+    cur_num, cur_den = (4, 4)
+    if ts_list:
+        cur_num, cur_den = ts_list[0].numerator, ts_list[0].denominator
+    while tick <= max_tick:
+        # Advance to a later time-signature if it falls at this tick
+        while ts_idx < len(ts_list) and ts_list[ts_idx].time <= tick:
+            cur_num = ts_list[ts_idx].numerator
+            cur_den = ts_list[ts_idx].denominator
+            ts_idx += 1
+        bar_starts.append(tick)
+        bar_len = int(round(cur_num / cur_den * 4 * tpq))
+        tick += max(bar_len, 1)  # guard against degenerate 0-length
+    # Sentinel so that bisect always has an upper bound
+    bar_starts.append(tick)
+
+    import bisect
+
+    tracks_out = {}
+    for piece_idx, track in enumerate(score.tracks):
+        reaper_idx = piece_to_reaper.get(piece_idx)
+        if reaper_idx is None:
+            continue
+        for note in track.notes:
+            # Find which bar this note falls in
+            bar_idx = bisect.bisect_right(bar_starts, note.time) - 1
+            if bar_idx < 0:
+                continue
+            if (reaper_idx, bar_idx) not in masked_set:
+                continue
+            bar_start_tick = bar_starts[bar_idx]
+            m_key = str(bar_idx)
+            tracks_out.setdefault(str(reaper_idx), {}).setdefault(m_key, []).append({
+                "pitch"        : int(note.pitch),
+                "velocity"     : int(note.velocity),
+                "start_tick"   : int(note.time) - bar_start_tick,
+                "duration_tick": int(note.duration),
+            })
+
+    return {"start_measure": start_measure, "end_measure": end_measure,
+            "tpq": tpq, "tracks": tracks_out}
 
 
 # ---------------------------------------------------------------------------
@@ -298,372 +431,345 @@ def _update(job, progress, message):
     _log(f"Job {job.job_id} [{progress:3d}%] {message}")
 
 
-def _seed_empty_masked_bars(song_dict: dict, infill_masks: list):
-    """Inject a ghost note into any masked bar that has no notes.
+def _build_status(job, track_info_list: list, num_bars: int,
+                   reaper_to_piece: dict) -> dict:
+    """Build MIDI-GPT Status JSON dict from job parameters.
 
-    The model needs at least one note in every bar it infills so it can
-    build the bar's attribute-control token context.  When the user selects
-    an empty measure we silently add a single inaudible note (velocity 1,
-    duration = 1/32 of the bar) before converting to a Score object.
+    Rules enforced by MIDI-GPT's validate_status:
+      - Every StatusTrack must have selectedBars with length >= model_dim.
+      - All selectedBars arrays must have the SAME length.
+      - All trackId values must be unique.
+      - If autoregressive=true, ALL bars must be selected.
+      - If ignore=true, NO bars may be selected (track must be CONDITION).
+      - trackId must reference a valid Piece track index.
 
-    ``infill_masks`` uses the *original* (pre-compaction) track indices
-    because this runs before _strip_empty_tracks.
-
-    Args:
-        song_dict:    Raw song dict from the client (modified in-place).
-        infill_masks: List of [track_idx, bar_idx] pairs to infill.
+    Only REAPER tracks that survived the MIDI roundtrip (present in
+    reaper_to_piece) are included in the Status.
     """
-    all_measures = song_dict.get("measures", [])
-    seeded_count = 0
+    nt = len(track_info_list)
 
-    for t, b in infill_masks:
-        if t >= len(all_measures) or b >= len(all_measures[t]):
-            continue
-        measure = all_measures[t][b]
-        if measure is None:
-            continue
-        if measure.get("notes"):
-            continue  # Already has content — nothing to do
-
-        instrument = measure.get("instrument", 0)
-        pitch      = 36 if instrument == 128 else 60
-        bar_dur    = float(measure.get("end_time", 0)) - float(measure.get("start_time", 0))
-        note_dur   = max(0.01, bar_dur / 32.0)
-
-        measure["notes"] = [{
-            "pitch"     : pitch,
-            "velocity"  : 1,
-            "start_time": 0.0,
-            "end_time"  : note_dur,
-        }]
-        seeded_count += 1
-
-    if seeded_count:
-        _log(f"Seeded {seeded_count} empty bar(s) with ghost notes.")
-
-
-def _strip_empty_tracks(score, job):
-    """Remove tracks that are completely empty AND not being infilled into.
-
-    A track with no notes that is listed in infill_masks must be kept —
-    the user explicitly asked to generate into it (and we just seeded it
-    with a ghost note, so the Score will actually have a note there now).
-    Only tracks with no notes AND no infill selections are discarded.
-    """
-    from symusic import Score as _Score
-
-    infill_tracks = {t for t, b in job.infill_masks}
-
-    orig_to_compact = {}
-    compact_to_orig = {}
-    compact_idx     = 0
-
-    compact_score = _Score(score.tpq, ttype="tick")
-    compact_score.tempos          = score.tempos
-    compact_score.time_signatures = score.time_signatures
-
-    for orig_idx, track in enumerate(score.tracks):
-        is_empty    = len(track.notes) == 0
-        is_infilled = orig_idx in infill_tracks
-        if is_empty and not is_infilled:
-            _log(f"  Stripping empty non-infill track {orig_idx} ({track.name!r})")
-            continue
-        orig_to_compact[orig_idx]    = compact_idx
-        compact_to_orig[compact_idx] = orig_idx
-        compact_score.tracks.append(track)
-        compact_idx += 1
-
-    def _remap(masks):
-        return [[orig_to_compact[t], b] for t, b in masks if t in orig_to_compact]
-
-    def _remap_list(lst):
-        return [orig_to_compact[t] for t in lst if t in orig_to_compact]
-
-    _log(f"  Tracks: {len(score.tracks)} -> {len(compact_score.tracks)}")
-    return (compact_score, orig_to_compact, compact_to_orig,
-            _remap(job.infill_masks), _remap(job.bar_masks),
-            _remap_list(job.ignore_tracks), _remap_list(job.autoregressive_tracks))
-
-
-def _reorder_for_ar(score, compact_infill, compact_bar_masks,
-                    compact_ignore, compact_autoreg, per_track_acs_compact):
-    """Reorder score tracks so the AR track is last among non-ignored tracks.
-
-    InferenceConfig / encode_tokens requires the autoregressive track to have
-    the highest track_idx among all non-ignored tracks (prune_score_tokens
-    preserves sorted order so the AR track lands at sequences[-1] in the
-    encoder).  The user can place their AR track anywhere in REAPER, so we
-    fix the ordering here — moving the AR track to the end of the active
-    block while leaving everything else in its original relative order.
-
-    Ordering (stable within each group):
-      1. Non-ignored, non-AR tracks
-      2. The AR track (at most one)
-      3. Ignored tracks (position irrelevant to encoder)
-
-    All index-based data structures are remapped to the new positions.
-
-    Returns:
-        (reordered_score, new_infill, new_bar_masks,
-         new_ignore, new_autoreg, new_per_track_acs, new_to_old)
-        where new_to_old[new_idx] = old_compact_idx.
-    """
-    nt          = len(score.tracks)
-    autoreg_set = set(compact_autoreg)
-    ignore_set  = set(compact_ignore)
-
-    ar_tracks     = [t for t in range(nt) if t in autoreg_set and t not in ignore_set]
-    non_ar_tracks = [t for t in range(nt) if t not in autoreg_set and t not in ignore_set]
-    ign_tracks    = [t for t in range(nt) if t in ignore_set]
-
-    if len(ar_tracks) > 1:
-        raise ValueError(
-            f"At most one autoregressive track is supported; "
-            f"found AR tracks at compact indices {ar_tracks}."
-        )
-
-    # Desired order: [non-AR active | AR | ignored]
-    new_to_old = non_ar_tracks + ar_tracks + ign_tracks
-    old_to_new = {old: new for new, old in enumerate(new_to_old)}
-
-    if new_to_old == list(range(nt)):
-        # Already in correct order — nothing to do.
-        return (score, compact_infill, compact_bar_masks,
-                compact_ignore, compact_autoreg,
-                per_track_acs_compact, new_to_old)
-
-    from symusic import Score as _Score
-    reordered_score = _Score(score.tpq, ttype="tick")
-    reordered_score.tempos          = score.tempos
-    reordered_score.time_signatures = score.time_signatures
-    for old_idx in new_to_old:
-        reordered_score.tracks.append(score.tracks[old_idx])
-
-    new_infill    = [[old_to_new[t], b] for t, b in compact_infill]
-    new_bar_masks = [[old_to_new[t], b] for t, b in compact_bar_masks]
-    new_ignore    = [old_to_new[t] for t in compact_ignore]
-    new_autoreg   = [old_to_new[t] for t in compact_autoreg]
-    new_acs       = {str(old_to_new[int(k)]): v
-                     for k, v in per_track_acs_compact.items()
-                     if int(k) in old_to_new}
-
-    _log(f"  AR reorder: new_to_old={new_to_old}")
-    return (reordered_score, new_infill, new_bar_masks,
-            new_ignore, new_autoreg, new_acs, new_to_old)
-
-
-def _remap_result_to_orig(result_dict, compact_to_orig):
-    remapped = {}
-    for k, measures in result_dict["tracks"].items():
-        orig = compact_to_orig.get(int(k), int(k))
-        remapped[str(orig)] = measures
-    return {**result_dict, "tracks": remapped}
-
-
-def _job_to_inference_dict(job) -> dict:
-    nt = job.song_dict["num_tracks"]
-    nm = job.song_dict["num_measures"]
-
-    infill_mask         = [[False]*nm for _ in range(nt)]
-    bar_mask            = [[False]*nm for _ in range(nt)]
-    ignore_mask         = [False]*nt
-    autoregressive_mask = [False]*nt
-
+    # Build per-track infill mask (using REAPER indices).
+    # infill_masks contain ABSOLUTE measure indices from REAPER (e.g. 34, 35),
+    # but the Piece has bars indexed 0..num_bars-1 relative to start_measure.
+    # infill_masks use RELATIVE bar indices (0-based from start of selection),
+    # matching the Piece's bar indexing.
+    _log(f"  _build_status: nt={nt}, num_bars={num_bars}, "
+         f"start_measure={job.start_measure}")
+    _log(f"  infill_masks ({len(job.infill_masks)} entries): "
+         f"{job.infill_masks[:20]}")
+    infill = [[False] * num_bars for _ in range(nt)]
+    mapped_count = 0
     for t, b in job.infill_masks:
-        infill_mask[t][b] = True
-    for t, b in job.bar_masks:
-        bar_mask[t][b] = True
-    for t in job.ignore_tracks:
-        ignore_mask[t] = True
-    for t in job.autoregressive_tracks:
-        autoregressive_mask[t] = True
+        if t < nt and 0 <= b < num_bars:
+            infill[t][b] = True
+            mapped_count += 1
+    _log(f"  Mapped {mapped_count}/{len(job.infill_masks)} mask entries")
 
-    # Extract structural HyperParam keys and inference-level overrides from
-    # gen_config_dict before it is forwarded to MMMGenerationConfig.
-    param = {}
-    for pkey in ["model_dim", "tracks_per_step", "bars_per_step"]:
-        if pkey in job.gen_config_dict:
-            param[pkey] = job.gen_config_dict.pop(pkey)
+    ignore_set = set(job.ignore_tracks)
+    ar_set     = set(job.autoregressive_tracks)
 
-    # Global autoregressive toggle from GlobalOptions JSFX slider.
-    # When on, every non-ignored track that has bars to generate becomes AR.
-    global_ar = job.gen_config_dict.pop("autoregressive", False)
-    if global_ar:
-        for t in range(nt):
-            if not ignore_mask[t] and any(infill_mask[t]):
-                autoregressive_mask[t] = True
+    # Global AR toggle from gen_config_dict
+    cfg       = dict(job.gen_config_dict)
+    global_ar = bool(cfg.get("autoregressive", False))
 
-    # Hard-limit logits processors (optional; absent = no limit).
-    max_density   = job.gen_config_dict.pop("max_density",   None)
-    max_polyphony = job.gen_config_dict.pop("max_polyphony", None)
+    # Global polyphony hard limit (0 means "no limit" in JSFX)
+    global_poly_limit = int(cfg.get("polyphony_hard_limit", 0))
 
-    if "top_k" in job.gen_config_dict.keys():
-        if job.gen_config_dict["top_k"] == 0.0:
-            job.gen_config_dict.pop("top_k", None)
+    tracks = []
+    for reaper_idx in range(nt):
+        # Skip tracks that were dropped during MIDI roundtrip (empty tracks)
+        if reaper_idx not in reaper_to_piece:
+            continue
+        piece_idx = reaper_to_piece[reaper_idx]
 
-    if "top_p" in job.gen_config_dict.keys():
-        if job.gen_config_dict["top_p"] == 0.0:
-            job.gen_config_dict.pop("top_p", None)
+        info       = track_info_list[reaper_idx]
+        instrument = int(info.get("instrument", 0))
+        is_drum    = (instrument == 128)
+        is_ignored = reaper_idx in ignore_set
 
-    track_cfgs = []
-    for t in range(nt):
-        bar_cfgs = []
-        for b in range(nm):
-            bar_cfgs.append({
-                "generate"          : infill_mask[t][b] and not ignore_mask[t],
-                "mask"              : bar_mask[t][b]    and not ignore_mask[t],
-                "attribute_controls": job.per_track_acs.get(str(t), {}) if infill_mask[t][b] else {},
-            })
-        track_cfgs.append({
-            "track_idx"         : t,
-            "bars"              : bar_cfgs,
-            "autoregressive"    : autoregressive_mask[t],
-            "ignore"            : ignore_mask[t],
-            "attribute_controls": {},
-        })
+        # Determine selected_bars
+        if is_ignored:
+            # Ignored tracks must be CONDITION: no bars selected
+            selected = [False] * num_bars
+            is_ar = False
+        else:
+            selected = list(infill[reaper_idx])
+            # Autoregressive
+            is_ar = reaper_idx in ar_set
+            if global_ar and any(selected):
+                is_ar = True
+            # MIDI-GPT constraint: AR requires all bars selected
+            if is_ar:
+                selected = [True] * num_bars
 
-    inf = {"tracks": track_cfgs, "param": param}
-    if max_density is not None:
-        inf["max_density"] = max_density
-    if max_polyphony is not None:
-        inf["max_polyphony"] = max_polyphony
-    return inf
+        # Parse per-track AC overrides (keyed by REAPER index)
+        acs = job.per_track_acs.get(str(reaper_idx), {})
+        def _ac_int(key, default=0):
+            try: return int(float(acs[key]))
+            except (KeyError, ValueError, TypeError): return default
+        def _ac_float(key, default=1.0):
+            try: return float(acs[key])
+            except (KeyError, ValueError, TypeError): return default
+
+        trk_temp = max(0.5, min(2.0, _ac_float("temperature", 1.0)))
+
+        # Polyphony hard limit: 0 means "disabled/no limit" in JSFX.
+        # C++ treats 0 as "limit of 0 notes" (blocks all onsets).
+        # Fall back: per-track → global → 100 (effectively no limit).
+        trk_poly = _ac_int("polyphony_hard_limit", 0)
+        if trk_poly == 0:
+            trk_poly = global_poly_limit
+        if trk_poly == 0:
+            trk_poly = 100  # protobuf maxval, effectively unlimited
+
+        # Build StatusTrack — all fields present with defaults.
+        # track_id must reference the Piece track index, not the REAPER index.
+        # YELLOW encoder controls: density (drums), polyphony_q, note_duration_q
+        st = {
+            "track_id"              : piece_idx,
+            "track_type"            : "STANDARD_DRUM_TRACK" if is_drum else "STANDARD_TRACK",
+            "instrument"            : _gm_program_to_type(instrument, is_drum),
+            "selected_bars"         : selected,
+            "autoregressive"        : is_ar,
+            "ignore"                : is_ignored,
+            "density"               : _ac_int("density", 0),
+            "min_polyphony_q"       : _ac_int("min_polyphony_q", 0),
+            "max_polyphony_q"       : _ac_int("max_polyphony_q", 0),
+            "min_note_duration_q"   : _ac_int("min_note_duration_q", 0),
+            "max_note_duration_q"   : _ac_int("max_note_duration_q", 0),
+            "polyphony_hard_limit"  : trk_poly,
+            "temperature"           : trk_temp,
+        }
+
+        tracks.append(st)
+
+    return {"tracks": tracks}
 
 
-def _preprocess_score(score: Score, end_measure: int) -> Score:
-    for ti in reversed(range(len(score.time_signatures))):
-        del score.time_signatures[ti]
-    for ti in reversed(range(len(score.tempos))):
-        del score.tempos[ti]
-    clip_time = (end_measure + 1) * score.tpq * 4
-    return score.clip(0, clip_time, clip_end=True, inplace=False)
+def _build_param(job, *, use_per_track_temperature: bool = False) -> dict:
+    """Build HyperParam JSON dict from gen_config_dict."""
+    cfg = dict(job.gen_config_dict)  # copy to avoid mutating original
 
+    # 0 means "disabled/no limit" in both JSFX and C++ (default_sample_param
+    # does NOT set polyphony_hard_limit — the line is commented out).
+    polyphony_limit = int(cfg.get("polyphony_hard_limit", 0))
+    mask_top_k      = float(cfg.get("mask_top_k", 0))
 
-def _score_to_result_dict(score: Score, masks, start_measure, end_measure) -> dict:
-    tpq           = score.tpq
-    ticks_per_bar = tpq * 4
-    masked_set    = {(int(t), int(b)) for t, b in masks}
-    tracks_out    = {}
+    model_dim     = int(cfg.get("model_dim", 4))
+    bars_per_step = min(int(cfg.get("bars_per_step", 1)), model_dim)
 
-    for track_idx, track in enumerate(score.tracks):
-        for note in track.notes:
-            measure_idx = note.time // ticks_per_bar
-            if (track_idx, measure_idx) not in masked_set:
-                continue
-            m_key = str(measure_idx)
-            tracks_out.setdefault(str(track_idx), {}).setdefault(m_key, []).append({
-                "pitch"        : int(note.pitch),
-                "velocity"     : int(note.velocity),
-                "start_tick"   : int(note.time) - measure_idx * ticks_per_bar,
-                "duration_tick": int(note.duration),
-            })
+    param = {
+        "ckpt"                    : CKPT_PATH,
+        "model_dim"               : model_dim,
+        "bars_per_step"           : bars_per_step,
+        "tracks_per_step"         : int(cfg.get("tracks_per_step", 1)),
+        "temperature"             : max(0.5, min(2.0, float(cfg.get("temperature", 1.0)))),
+        "use_per_track_temperature": use_per_track_temperature,
+        "percentage"              : 100,
+        "batch_size"              : 1,
+        "shuffle"                 : True,
+        "verbose"                 : DEBUG,
+        "max_steps"               : 0,
+        "polyphony_hard_limit"    : polyphony_limit,
+        "mask_top_k"              : mask_top_k,
+    }
 
-    return {"start_measure": start_measure, "end_measure": end_measure,
-            "tpq": tpq, "tracks": tracks_out}
+    return param
 
 
 # ---------------------------------------------------------------------------
 # Job runner
 # ---------------------------------------------------------------------------
 
+def _debug_dump(job_id: str, name: str, data, ext: str = ".json"):
+    """Save an intermediate artifact to DEBUG_DUMP_DIR for inspection."""
+    if not DEBUG_DUMP_DIR:
+        return None
+    os.makedirs(DEBUG_DUMP_DIR, exist_ok=True)
+    short_id = job_id[:8]
+    path = os.path.join(DEBUG_DUMP_DIR, f"{short_id}_{name}{ext}")
+    if ext == ".mid":
+        # data is a symusic Score or a file path to copy
+        if isinstance(data, str):
+            import shutil
+            shutil.copy2(data, path)
+        else:
+            data.dump_midi(path)
+    elif ext == ".json":
+        if isinstance(data, str):
+            with open(path, "w") as f:
+                f.write(data)
+        else:
+            with open(path, "w") as f:
+                json.dump(data, f, indent=2)
+    _log(f"  DEBUG DUMP: {path}")
+    return path
+
+
 def _run_job(job: Job):
     job.status     = STATUS_RUNNING
     job.started_at = time.time()
     _update(job, 5, "Starting")
 
+    input_path  = None
+    output_path = None
+
     try:
-        # Step 1: Seed empty masked bars BEFORE converting to Score.
-        # Tracks selected for infill may be completely empty; seeding ensures
-        # they survive _strip_empty_tracks and have valid encoder context.
-        _update(job, 10, "Seeding empty masked bars")
-        _seed_empty_masked_bars(job.song_dict, job.infill_masks)
+        # Step 1: Convert song_dict → symusic Score → temp MIDI file.
+        _update(job, 10, "Converting MIDI data")
 
-        # Step 2: Convert to symusic Score.
-        _update(job, 13, "Converting MIDI to Score")
-        score = midisong_dict_to_score(job.song_dict)
+        # Tracks that are in infill_masks or autoregressive must survive
+        # the MIDI roundtrip even if empty (so the model has a slot).
+        masked_tracks = {int(t) for t, b in job.infill_masks}
+        ar_tracks     = set(job.autoregressive_tracks)
+        keep_alive    = masked_tracks | ar_tracks
 
-        # Step 3: Drop tracks that are empty AND not being infilled.
-        _update(job, 15, "Stripping empty tracks")
-        (score, orig_to_compact, compact_to_orig,
-         compact_infill, compact_bar_masks,
-         compact_ignore, compact_autoreg) = _strip_empty_tracks(score, job)
+        score = midisong_dict_to_score(job.song_dict, keep_alive)
 
-        if len(score.tracks) == 0:
-            raise ValueError("All tracks are empty — nothing to generate")
+        fd, input_path = tempfile.mkstemp(suffix=".mid")
+        os.close(fd)
+        score.dump_midi(input_path)
 
-        # Step 4: Remap per-track AC overrides to compact indices.
-        compact_per_track_acs = {
-            str(orig_to_compact[int(k)]): v
-            for k, v in job.per_track_acs.items()
-            if int(k) in orig_to_compact
-        }
+        # DEBUG: Save input MIDI (what REAPER sent us, converted to MIDI)
+        _debug_dump(job.job_id, "1_input", score, ".mid")
 
-        # Step 5: Move the AR track to the end of the non-ignored block.
-        # encode_tokens treats the last track in the pruned sequence as AR;
-        # InferenceConfig validates that the AR track has the highest track_idx.
-        _update(job, 17, "Reordering tracks for autoregressive mode")
-        (score, compact_infill, compact_bar_masks,
-         compact_ignore, compact_autoreg,
-         compact_per_track_acs, new_to_old) = _reorder_for_ar(
-            score, compact_infill, compact_bar_masks,
-            compact_ignore, compact_autoreg, compact_per_track_acs
+        # Step 2: Encode MIDI → Piece JSON via encoder.
+        _update(job, 20, "Encoding MIDI to Piece")
+        piece_json = ENCODER.midi_to_json(input_path)
+        os.unlink(input_path)
+        input_path = None
+
+        # DEBUG: Save Piece JSON (what the encoder produced)
+        _debug_dump(job.job_id, "2_piece", piece_json, ".json")
+
+        # Verify bar / track counts and build track mapping.
+        # The MIDI roundtrip (symusic → MIDI file → encoder parser) may drop
+        # empty tracks, so Piece track indices can differ from REAPER indices.
+        piece_dict = json.loads(piece_json)
+        track_info = job.song_dict.get("track_info", [])
+        num_bars   = (len(piece_dict["tracks"][0]["bars"])
+                      if piece_dict.get("tracks") else 0)
+
+        # Build reaper_idx → piece_idx mapping.
+        piece_tracks = piece_dict.get("tracks", [])
+        _log(f"Piece: {len(piece_tracks)} tracks, "
+             f"{num_bars} bars (expected {job.song_dict['num_measures']})")
+
+        # Detect which REAPER tracks are empty (no notes in any measure)
+        # AND were not kept alive with a placeholder.  Those tracks were
+        # dropped during the MIDI roundtrip and have no Piece track.
+        all_measures = job.song_dict.get("measures", [])
+        reaper_empty = set()
+        for reaper_idx, track_measures in enumerate(all_measures):
+            has_notes = False
+            for m in track_measures:
+                if m is not None and m.get("notes"):
+                    has_notes = True
+                    break
+            if not has_notes and reaper_idx not in keep_alive:
+                reaper_empty.add(reaper_idx)
+                _log(f"  REAPER track {reaper_idx} is empty — skipping in mapping")
+
+        # Build a list of (is_drum, instrument) for each Piece track
+        piece_signatures = []
+        for pt in piece_tracks:
+            pt_type = pt.get("trackType", "STANDARD_TRACK")
+            pt_drum = (pt_type == "STANDARD_DRUM_TRACK")
+            pt_inst = int(pt.get("instrument", 0))
+            piece_signatures.append((pt_drum, pt_inst))
+
+        # Map REAPER track indices to Piece track indices.
+        # Skip empty REAPER tracks (they were dropped from the Piece).
+        reaper_to_piece = {}   # reaper_idx → piece_idx
+        piece_to_reaper = {}   # piece_idx  → reaper_idx
+        piece_claimed = set()
+
+        for reaper_idx, info in enumerate(track_info):
+            if reaper_idx in reaper_empty:
+                continue  # no Piece track for this empty REAPER track
+            instrument = int(info.get("instrument", 0))
+            is_drum = (instrument == 128)
+            # Find best matching unclaimed piece track
+            for piece_idx, (p_drum, p_inst) in enumerate(piece_signatures):
+                if piece_idx in piece_claimed:
+                    continue
+                if p_drum == is_drum:
+                    reaper_to_piece[reaper_idx] = piece_idx
+                    piece_to_reaper[piece_idx]  = reaper_idx
+                    piece_claimed.add(piece_idx)
+                    break
+
+        _log(f"Track mapping (reaper→piece): {reaper_to_piece}")
+
+        # Step 3: Build Status JSON.
+        _update(job, 25, "Building generation parameters")
+        status      = _build_status(job, track_info, num_bars, reaper_to_piece)
+        status_json = json.dumps(status)
+
+        # Step 4: Build HyperParam JSON.
+        has_per_track_temp = any(
+            "temperature" in acs
+            for acs in job.per_track_acs.values())
+        param      = _build_param(job, use_per_track_temperature=has_per_track_temp)
+        param_json = json.dumps(param)
+
+        _log(f"Status : {len(status['tracks'])} tracks")
+        for st in status['tracks']:
+            sel_count = sum(st['selected_bars'])
+            _log(f"  track_id={st['track_id']} "
+                 f"type={st['track_type']} "
+                 f"ignore={st['ignore']} "
+                 f"ar={st['autoregressive']} "
+                 f"selected={sel_count}/{len(st['selected_bars'])}")
+        _log(f"Param  : model_dim={param['model_dim']}, "
+             f"bars_per_step={param['bars_per_step']}, "
+             f"temp={param['temperature']}, "
+             f"mask_top_k={param['mask_top_k']}")
+
+        # DEBUG: Save Status and HyperParam JSON
+        _debug_dump(job.job_id, "3_status", status_json, ".json")
+        _debug_dump(job.job_id, "4_param", param_json, ".json")
+
+        # Step 5: Run inference.
+        _update(job, 35, "Running model...")
+        result_json = mmm_refactored.sample_multi_step(
+            piece_json, status_json, param_json,
         )
-        # Carry the reordering through to the orig-index lookup used for write-back.
-        compact_to_orig = {new: compact_to_orig[old] for new, old in enumerate(new_to_old)}
+        _log("Generation complete")
 
-        # Step 6: Build InferenceConfig.
-        _update(job, 20, "Building inference config")
+        # DEBUG: Save result Piece JSON (what the model produced)
+        _debug_dump(job.job_id, "5_result_piece", result_json, ".json")
 
-        class _CJ:
-            pass
-        _cj = _CJ()
-        _cj.song_dict             = {"num_tracks": len(score.tracks),
-                                     "num_measures": job.song_dict["num_measures"]}
-        _cj.infill_masks          = compact_infill
-        _cj.bar_masks             = compact_bar_masks
-        _cj.ignore_tracks         = compact_ignore
-        _cj.autoregressive_tracks = compact_autoreg
-        _cj.per_track_acs         = compact_per_track_acs
-        _cj.gen_config_dict       = job.gen_config_dict
+        # Step 6: Convert result Piece JSON → MIDI → symusic Score.
+        _update(job, 85, "Processing result")
+        fd, output_path = tempfile.mkstemp(suffix=".mid")
+        os.close(fd)
+        ENCODER.json_to_midi(result_json, output_path)
+        result_score = Score(output_path)
 
-        inf           = _job_to_inference_dict(_cj)
-        inference_cfg = InferenceConfig.convert_from_dict(inf)
+        # DEBUG: Save result MIDI (what the encoder decoded back to MIDI)
+        _debug_dump(job.job_id, "6_result", result_score, ".mid")
 
-        # Step 7: Build generation config (temperature, seed, top-k/p …).
-        _update(job, 25, "Building generation config")
-        gen_cfg = MMMGenerationConfig.convert_from_dict(job.gen_config_dict)
-        gen_cfg.temperature = max(0.5, min(2.0, gen_cfg.temperature))
+        os.unlink(output_path)
+        output_path = None
 
-        if gen_cfg.seed is not None and gen_cfg.seed > 0:
-            _log(f"Setting seed {gen_cfg.seed}")
-            set_seed(gen_cfg.seed)
-            #torch.manual_seed(gen_cfg.seed)
-            #torch.cuda.manual_seed_all(gen_cfg.seed)
-        else:
-            seed = int(time.time() * 1000000) % (2 ** 32)
-            set_seed(seed)
-            #torch.manual_seed(seed)
-            #torch.cuda.manual_seed_all(seed)
-
-        # Step 8: Pre-process score (strip tempo map, clip length).
-        _update(job, 30, "Pre-processing score")
-        score = _preprocess_score(score, job.end_measure - job.start_measure)
-
-        # Step 9: Run the model.
-        _update(job, 35, "Running MMM model...")
-        gen_score = generate(
-            mmm              = MMM_MODEL,
-            score_or_path    = score,
-            inference_config = inference_cfg,
-            generate_kwargs  = {"generation_config": gen_cfg.to_hf()},
-            device           = DEVICE,
-        )
-
-        # Step 10: Package and remap results back to original track indices.
+        # Step 7: Extract notes from infilled bars → result dict.
         _update(job, 90, "Packaging result")
-        raw          = _score_to_result_dict(gen_score, compact_infill,
-                                             job.start_measure, job.end_measure)
-        job.result   = _remap_result_to_orig(raw, compact_to_orig)
+        _log(f"Result score: {len(result_score.tracks)} tracks, "
+             f"{sum(len(t.notes) for t in result_score.tracks)} notes, "
+             f"tpq={result_score.tpq}")
+        job.result   = _score_to_result_dict(
+            result_score, job.infill_masks, job.start_measure,
+            job.end_measure, piece_to_reaper)
+        total_notes = sum(
+            len(nl) for md in job.result.get("tracks", {}).values()
+            for nl in md.values())
+        _log(f"Result dict: {len(job.result.get('tracks', {}))} tracks, "
+             f"{total_notes} notes extracted")
+
+        # DEBUG: Save final result dict (what gets sent back to REAPER)
+        _debug_dump(job.job_id, "7_result_dict", job.result, ".json")
+
         job.status   = STATUS_DONE
         job.ended_at = time.time()
         _update(job, 100, f"Done in {round(job.ended_at - job.started_at, 1)}s")
@@ -675,6 +781,14 @@ def _run_job(job: Job):
         job.ended_at = time.time()
         _log(f"Job {job.job_id} FAILED: {e}")
         traceback.print_exc()
+
+    finally:
+        for p in (input_path, output_path):
+            if p and os.path.exists(p):
+                try:
+                    os.unlink(p)
+                except OSError:
+                    pass
 
 
 # ---------------------------------------------------------------------------
@@ -736,8 +850,8 @@ def server_status() -> dict:
             counts[j.status] += 1
     return {
         "model_ready"  : MODEL_READY,
-        "active_model" : ACTIVE_MODEL_ID or "",
-        "device"       : str(DEVICE),
+        "active_model" : "mmm_refactored",
+        "device"       : "managed by mmm_refactored",
         "max_workers"  : MAX_WORKERS,
         "queued"       : counts[STATUS_QUEUED],
         "running"      : counts[STATUS_RUNNING],
@@ -752,10 +866,9 @@ def server_status() -> dict:
 
 def start_server(model_config_path: str = None):
     print("=" * 60)
-    print("MMM Inference Server")
+    print("MIDI-GPT Inference Server")
     print("=" * 60)
     print(f"  Port        : {PORT}")
-    print(f"  Device      : {DEVICE}")
     print(f"  Max workers : {MAX_WORKERS}")
     print(f"  Config      : {MODEL_CONFIG_PATH}")
     print("=" * 60)
@@ -769,7 +882,7 @@ def start_server(model_config_path: str = None):
     server.register_function(submit_job,       "submit_job")
     server.register_function(get_job_status,   "get_job_status")
     server.register_function(get_job_result,   "get_job_result")
-    server.register_function(cancel_job,       "cancel_job")
+    server.register_function(cancel_job,        "cancel_job")
     server.register_function(server_status,    "server_status")
     server.register_function(get_model_schema, "get_model_schema")
 
@@ -786,7 +899,7 @@ def start_server(model_config_path: str = None):
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description="MMM inference server")
+    parser = argparse.ArgumentParser(description="MIDI-GPT inference server")
     parser.add_argument("--config",  default=None,
                         help="Path to model_config.json (default: ./model_config.json)")
     parser.add_argument("--port",    type=int, default=PORT)

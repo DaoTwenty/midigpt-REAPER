@@ -1,14 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-REAPER_mmm_infill.py  --  REAPER-side MMM client
+REAPER_mmm_infill.py  --  REAPER-side MIDI-GPT client
 
 On every run:
-  1. Call get_model_schema() -- returns ac_schema, track_fx_id, seeded_bar_ac
+  1. Call get_model_schema() -- returns ac_schema, track_fx_id
   2. Use track_fx_id to find the correct Track Options JSFX on each track
   3. Read AC values from those sliders according to ac_schema
   4. Submit infill job
 
-Model is set server-side at startup via model_config.json. No switching here.
+Model is set server-side at startup via model_config.json.
 """
 
 import sys
@@ -62,12 +62,9 @@ def is_approx(x, y, tol=0.0001):
 def _format_ac_value(schema_param: dict, raw_value: float) -> str:
     """Convert raw slider float to the AC string the server expects."""
     fmt = schema_param.get("format", "int")
-    v   = int(round(raw_value))
-    if fmt == "density":
-        return str(v) + ("+" if v == 18 else "")
-    elif fmt == "float":
+    if fmt == "float":
         return str(float(raw_value))
-    return str(v)
+    return str(int(round(raw_value)))
 
 
 # ---------------------------------------------------------------------------
@@ -76,37 +73,33 @@ def _format_ac_value(schema_param: dict, raw_value: float) -> str:
 
 class GlobalOptions:
     def __init__(self):
-        self.temperature     = 1.0
-        self.model_dim       = 4
-        self.bars_per_step   = 1
-        self.tracks_per_step = 1
-        self.sampling_seed   = -1
-        self.mask_top_k      = 0
-        self.mask_top_p      = 0.0
-        self.max_density     = -1   # -1 = disabled
-        self.max_polyphony   = -1   # -1 = disabled
+        self.temperature          = 1.0
+        self.model_dim            = 4
+        self.bars_per_step        = 1
+        self.tracks_per_step      = 1
+        self.mask_top_k           = 0.0
+        self.polyphony_hard_limit = 0
 
     def to_gen_dict(self) -> dict:
+        # Clamp bars_per_step to model_dim (protobuf constraint)
+        bps = min(self.bars_per_step, self.model_dim)
         d = {
             "temperature"    : self.temperature,
             "model_dim"      : self.model_dim,
-            "bars_per_step"  : self.bars_per_step,
+            "bars_per_step"  : bps,
             "tracks_per_step": self.tracks_per_step,
-            "seed"           : self.sampling_seed,
-            "top_k"          : self.mask_top_k,
-            "top_p"          : self.mask_top_p,
         }
-        if self.max_density >= 0:
-            d["max_density"] = self.max_density
-        if self.max_polyphony >= 0:
-            d["max_polyphony"] = self.max_polyphony
+        if self.mask_top_k > 0:
+            d["mask_top_k"] = self.mask_top_k
+        if self.polyphony_hard_limit > 0:
+            d["polyphony_hard_limit"] = self.polyphony_hard_limit
         return d
 
 
 def _locate_global_fx() -> int:
     """Find Global Options FX on master monitor chain. Returns full index or -1."""
     try:
-        master = RPR_GetMasterTrack(-1)
+        master = RPR_GetMasterTrack(0)
         for i in range(100):
             idx = 0x1000000 + i
             if RPR_TrackFX_GetEnabled(master, idx):
@@ -127,16 +120,19 @@ def get_global_options() -> GlobalOptions:
         fx_loc = _locate_global_fx()
         if fx_loc == -1:
             return opts
-        # param 0 = jsfx_id, params 1..10 = sliders 2..11
-        opts.temperature     = float(RPR_TrackFX_GetParam(master, fx_loc, 1, 0, 0)[0])
-        opts.model_dim       = int(RPR_TrackFX_GetParam(master, fx_loc, 2, 0, 0)[0])
-        opts.bars_per_step   = int(RPR_TrackFX_GetParam(master, fx_loc, 3, 0, 0)[0])
-        opts.tracks_per_step = int(RPR_TrackFX_GetParam(master, fx_loc, 4, 0, 0)[0])
-        opts.sampling_seed   = int(RPR_TrackFX_GetParam(master, fx_loc, 5, 0, 0)[0])
-        opts.mask_top_k      = int(RPR_TrackFX_GetParam(master, fx_loc, 6, 0, 0)[0])
-        opts.mask_top_p      = float(RPR_TrackFX_GetParam(master, fx_loc, 7, 0, 0)[0])
-        opts.max_density     = int(RPR_TrackFX_GetParam(master, fx_loc, 8, 0, 0)[0])
-        opts.max_polyphony   = int(RPR_TrackFX_GetParam(master, fx_loc, 9, 0, 0)[0])
+        # param 0 = jsfx_id
+        # param 1 = temperature        (slider2)
+        # param 2 = model_dim           (slider3)
+        # param 3 = bars_per_step       (slider4)
+        # param 4 = tracks_per_step     (slider5)
+        # param 5 = mask_top_k          (slider6)
+        # param 6 = polyphony_hard_limit(slider7)
+        opts.temperature          = float(RPR_TrackFX_GetParam(master, fx_loc, 1, 0, 0)[0])
+        opts.model_dim            = int(RPR_TrackFX_GetParam(master, fx_loc, 2, 0, 0)[0])
+        opts.bars_per_step        = int(RPR_TrackFX_GetParam(master, fx_loc, 3, 0, 0)[0])
+        opts.tracks_per_step      = int(RPR_TrackFX_GetParam(master, fx_loc, 4, 0, 0)[0])
+        opts.mask_top_k           = float(RPR_TrackFX_GetParam(master, fx_loc, 5, 0, 0)[0])
+        opts.polyphony_hard_limit = int(RPR_TrackFX_GetParam(master, fx_loc, 6, 0, 0)[0])
     except Exception:
         pass
     return opts
@@ -168,8 +164,8 @@ def get_track_options(ac_schema: list, track_fx_id: float):
 
     Returns a 3-tuple:
         per_track_acs       : {str(track_idx): {ac_key: formatted_value}}
-        autoregressive_tracks: [track_idx, ...]   tracks with slider63 = On
-        ignore_tracks        : [track_idx, ...]   tracks with slider64 = On
+        autoregressive_tracks: [track_idx, ...]
+        ignore_tracks        : [track_idx, ...]
     """
     track_opts         = {}
     autoregressive_tracks = []
@@ -185,7 +181,7 @@ def get_track_options(ac_schema: list, track_fx_id: float):
         acs = {}
         for slot, param_def in enumerate(ac_schema):
             ac_key  = param_def.get("ac_key")
-            default = float(param_def.get("default", -1))
+            default = float(param_def.get("default", 0))
             if not ac_key:
                 continue
             try:
@@ -203,9 +199,6 @@ def get_track_options(ac_schema: list, track_fx_id: float):
         post_ac_idx = len(ac_schema) - 1
 
         # -- Fixed behavior flags (autoregressive / ignore) -------------------
-        # Use GetParamFromIdent with the slider variable name so we're immune to
-        # REAPER's param-index numbering (which is position in the declared slider
-        # list, NOT the slider number).  Returns -1 if the param isn't present.
         try:
             ar_raw = RPR_TrackFX_GetParam(
                 track, fx_loc, TRACK_OPTIONS_AC_OFFSET + post_ac_idx + 1, 0, 0)[0]
@@ -306,7 +299,7 @@ def run_mmm_infill():
     proxy = ServerProxy(SERVER_URL, allow_none=True)
 
     # ---- 0. Health check ------------------------------------------------- #
-    print("Checking MMM server...\n")
+    print("Checking MIDI-GPT server...\n")
     try:
         srv = proxy.server_status()
     except Exception as e:
@@ -322,7 +315,6 @@ def run_mmm_infill():
         print(f"Note: {queue_depth} job(s) already running/queued.\n")
 
     # ---- 1. Fetch model schema ------------------------------------------- #
-    # One call per run -- tells us which JSFX to look for and what params mean.
     try:
         schema = proxy.get_model_schema()
         if not schema.get("ok"):
@@ -339,8 +331,7 @@ def run_mmm_infill():
     # ---- 2. Read global options ------------------------------------------ #
     options = get_global_options()
     print(f"Global options:")
-    print(f"  Max density    : {options.max_density if options.max_density >= 0 else 'disabled'}")
-    print(f"  Max polyphony  : {options.max_polyphony if options.max_polyphony >= 0 else 'disabled'}\n")
+    print(f"  Polyphony limit : {options.polyphony_hard_limit if options.polyphony_hard_limit > 0 else 'disabled'}\n")
 
     # ---- 3. Read per-track AC values ------------------------------------- #
     per_track_acs, autoregressive_tracks, ignore_tracks = get_track_options(ac_schema, track_fx_id)
@@ -379,7 +370,7 @@ def run_mmm_infill():
     print(f"Masked   : {extraction.masks.count} (track, bar) positions\n")
 
     # ---- 5. Submit job --------------------------------------------------- #
-    print("Submitting job to MMM server...\n")
+    print("Submitting job to MIDI-GPT server...\n")
     try:
         job_id = proxy.submit_job(
             extraction.song.to_dict(),
@@ -460,7 +451,7 @@ def run_mmm_infill():
         return
 
     print("Done.\n")
-    RPR_Undo_OnStateChange("MMM Infill")
+    RPR_Undo_OnStateChange("MIDI-GPT Infill")
 
 
 # ---------------------------------------------------------------------------
