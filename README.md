@@ -49,7 +49,7 @@ The model sees your existing MIDI as context and generates new notes for the bar
 ## Requirements
 
 - **REAPER** 64-bit (v6 or later) — [Download REAPER](https://www.reaper.fm/download.php) (make sure to select the **64-bit** version for your OS)
-- **Python** >= 3.10 (Python 3.14 recommended) — [Download Python](https://www.python.org/downloads/)
+- **Python** 3.10 – 3.12 (3.12 recommended) — [Download Python](https://www.python.org/downloads/)
 - **OS:** macOS, Linux, or Windows
 
 > **Important:** Download the **64-bit** version of REAPER. The 32-bit version is not compatible with MIDI-GPT.
@@ -114,7 +114,7 @@ You need **Python**, **CMake**, **Protocol Buffers (protobuf)**, and **Git**. Be
 If you don't have Homebrew, install it first: https://brew.sh
 
 ```bash
-brew install python@3.14 cmake protobuf@21 git
+brew install python@3.12 cmake protobuf@21 git
 ```
 
 > **protobuf@21** is keg-only on Homebrew, meaning it won't be linked to your PATH automatically. The installer handles this, but if building manually you may need to tell CMake where to find it:
@@ -127,7 +127,7 @@ brew install python@3.14 cmake protobuf@21 git
 
 **Windows:**
 
-Install [Python 3.14](https://www.python.org/downloads/) from python.org (check "Add to PATH" during install), then:
+Install [Python 3.12](https://www.python.org/downloads/release/python-3120/) from python.org (check "Add to PATH" during install), then:
 
 ```powershell
 # Using winget (built into Windows 10/11):
