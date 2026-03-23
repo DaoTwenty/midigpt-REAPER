@@ -228,7 +228,7 @@ if ($LASTEXITCODE -eq 0) {
     Write-OK "PyTorch $TorchVer already installed"
 } else {
     Write-Info "Installing PyTorch (this may take a few minutes)..."
-    pip install "torch>=2.0" -q
+    pip3 install torch torchvision -q
     $TorchVer = python -c "import torch; print(torch.__version__)"
     Write-OK "PyTorch $TorchVer installed"
 }

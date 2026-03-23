@@ -280,9 +280,28 @@ if python -c "import torch" 2>/dev/null; then
     ok "PyTorch $TORCH_VER already installed"
 else
     info "Installing PyTorch (this may take a few minutes)..."
-    pip install torch>=2.0 -q
-    TORCH_VER="$(python -c 'import torch; print(torch.__version__)')"
-    ok "PyTorch $TORCH_VER installed"
+    if [ "$PLATFORM" = "linux" ]; then
+        pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cpu -q 2>/dev/null
+    else
+        pip3 install torch torchvision -q 2>/dev/null
+    fi
+    if python -c "import torch" 2>/dev/null; then
+        TORCH_VER="$(python -c 'import torch; print(torch.__version__)')"
+        ok "PyTorch $TORCH_VER installed"
+    else
+        echo ""
+        warn "PyTorch could not be installed automatically."
+        echo ""
+        echo "  This usually means there is no pre-built PyTorch wheel for your"
+        echo "  Python version or platform. Please install PyTorch manually:"
+        echo ""
+        echo "  1. Visit: https://pytorch.org/get-started/locally/"
+        echo "  2. Select your OS, package manager (pip), and Python version"
+        echo "  3. Run the install command it gives you (with this venv activated)"
+        echo "  4. Then re-run this installer"
+        echo ""
+        fail "PyTorch installation failed. See instructions above."
+    fi
 fi
 
 # Install other build deps
