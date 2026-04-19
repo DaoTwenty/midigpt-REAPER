@@ -18,6 +18,8 @@ src/Scripts/composers_assistant_v2/models_permuted_labels/
 /models
 
 /.venv
+/.wheel-build-venv/
+/wheelhouse/
 *.zip
 *.xml
 *.html

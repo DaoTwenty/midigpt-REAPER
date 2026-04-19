@@ -135,7 +135,11 @@ def initialize_model(model_config_path: str = None) -> bool:
         _log(f"Ckpt   : {CKPT_PATH}")
 
         if not os.path.exists(CKPT_PATH):
-            _log(f"WARNING: Checkpoint not found at {CKPT_PATH}")
+            raise FileNotFoundError(
+                f"Model checkpoint not found: {CKPT_PATH}. "
+                "Set the correct path in src/Scripts/MMM/models/config.json "
+                "or place model.pt next to that config file."
+            )
 
         ENCODER     = mmm_refactored.ElVelocityDurationPolyphonyYellowEncoder()
         MODEL_READY = True
@@ -212,7 +216,15 @@ def midisong_dict_to_score(song_dict: dict,
                 continue
             bpm        = float(m.get("tempo", 120.0) or 120.0)
             ts         = m.get("time_signature", (4, 4))
-            num, denom = (ts[0], ts[1]) if isinstance(ts, (list, tuple)) else (4, 4)
+            if isinstance(ts, (list, tuple)) and len(ts) >= 2:
+                num = int(round(float(ts[0])))
+                denom = int(round(float(ts[1])))
+            else:
+                num, denom = 4, 4
+            if num <= 0:
+                num = 4
+            if denom <= 0:
+                denom = 4
             rel_tick   = _secs_to_ticks(float(m["start_time"]) - origin_secs, bpm)
             tempo_at_tick.setdefault(rel_tick, bpm)
             timesig_at_tick.setdefault(rel_tick, (num, denom))
@@ -225,7 +237,7 @@ def midisong_dict_to_score(song_dict: dict,
     for tick in sorted(timesig_at_tick):
         num, denom = timesig_at_tick[tick]
         score.time_signatures.append(
-            TimeSignature(time=tick, numerator=num, denominator=denom))
+            TimeSignature(time=int(tick), numerator=int(num), denominator=int(denom)))
 
     for track_idx, track_measures in enumerate(all_measures):
         info       = track_info_list[track_idx] if track_idx < len(track_info_list) else {}

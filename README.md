@@ -100,6 +100,48 @@ If you cloned this repo and have the `mmm_refactored` zip separately:
 | `--skip-deps` | `-SkipDeps` | Skip system dependency check |
 | `--skip-reaper-config` | `-SkipReaperConfig` | Don't modify `reaper.ini` |
 
+#### Windows Git Bash / portable REAPER notes
+
+If you are installing from **Git Bash** instead of PowerShell, use:
+
+```bash
+./test-windows-env.sh --reaper-dir=/c/path/to/REAPER-resource-dir
+./install-windows.sh --reaper-dir=/c/path/to/REAPER-resource-dir --mmm-zip=/c/path/to/mmm_refactored.zip
+```
+
+Use `--reaper-dir` when REAPER is running as a **portable install** and its resource path is not `%APPDATA%/REAPER`.
+
+If you want a reusable Windows wheel for the native backend, build it with:
+
+```bash
+./build-mmm-wheel.sh --mmm-zip=/c/path/to/mmm_refactored.zip
+```
+
+The wheel builder applies the Windows compatibility patch, bundles native runtime DLLs, and verifies `import mmm_refactored` in a clean venv before finishing.
+
+Temporary prebuilt Windows wheel:
+
+```text
+https://drive.google.com/file/d/1NXuhpYhbC9meK6wK3Spqej1ULD9VtYwY/view?usp=sharing
+```
+
+For the **Windows installer path**, do this:
+
+```bash
+winget install --id=astral-sh.uv -e
+mkdir -p wheelhouse
+# then move the downloaded .whl into ./wheelhouse/
+./install-windows.sh --reaper-dir=/c/path/to/REAPER-resource-dir
+```
+
+The installer will create the `uv`-managed `.venv` for you and will auto-detect the newest `mmm_refactored-*.whl` in `./wheelhouse/` before falling back to a source build.
+
+If you want to point the installer at a specific wheel explicitly, use:
+
+```bash
+./install-windows.sh --mmm-wheel=/c/path/to/downloaded-wheel.whl
+```
+
 ### Manual Installation
 
 <details>
@@ -238,7 +280,7 @@ After installation, you need to load the script and effects into REAPER. This is
 The Global Options effect controls model-wide settings like temperature and context size.
 
 1. Go to **View > Monitoring Effects** (or click the Monitor FX button on the master track)
-2. Click **Add** and search for **`MMM Global Options`**
+2. Click **Add** and search for **`JS: MMM Global Options`**
 3. Add it to the Monitor FX chain
 
 This only needs to be done once — Monitor FX persist across all projects.
@@ -249,7 +291,7 @@ Each track you want to control needs a Track Options effect. This gives you per-
 
 1. Select a track
 2. Open its **FX chain** (click the FX button)
-3. Add **`MMM Track Options (Density-Polyphony)`**
+3. Add **`JS: MMM Track Options (MIDI-GPT)`**
 
 Repeat for every track where you want generation controls. Tracks without the FX will still be generated but with default parameters.
 
