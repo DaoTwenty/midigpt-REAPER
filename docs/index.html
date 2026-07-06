@@ -5,34 +5,40 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MIDI-GPT for REAPER — Documentation</title>
 <style>
+  /* ── Brand colours ─────────────────────────────────────────────────────── */
   :root {
-    --bg: #ffffff;
-    --fg: #1a1a2e;
-    --muted: #555;
-    --accent: #2563eb;
-    --accent-light: #dbeafe;
-    --border: #e2e8f0;
-    --code-bg: #f1f5f9;
-    --blockquote-bg: #fffbeb;
-    --blockquote-border: #f59e0b;
-    --table-stripe: #f8fafc;
-    --shadow: 0 1px 3px rgba(0,0,0,0.08);
+    --bg:               #ffffff;
+    --fg:               #1a1a2e;
+    --muted:            #555;
+    --accent:           #eb1c3b;
+    --accent-light:     #fde8eb;
+    --accent-dark:      #c4152f;
+    --border:           #e2e8f0;
+    --code-bg:          #f8f8f8;
+    --blockquote-bg:    #fffbeb;
+    --blockquote-border:#f59e0b;
+    --table-stripe:     #f8fafc;
+    --shadow:           0 1px 3px rgba(0,0,0,0.08);
+    --sidebar-w:        240px;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #0f172a;
-      --fg: #e2e8f0;
-      --muted: #94a3b8;
-      --accent: #60a5fa;
-      --accent-light: #1e3a5f;
-      --border: #334155;
-      --code-bg: #1e293b;
-      --blockquote-bg: #1c1917;
-      --blockquote-border: #d97706;
-      --table-stripe: #1e293b;
-      --shadow: 0 1px 3px rgba(0,0,0,0.3);
+      --bg:               #0f1117;
+      --fg:               #e2e8f0;
+      --muted:            #94a3b8;
+      --accent:           #ef4d63;
+      --accent-light:     #2a1018;
+      --accent-dark:      #eb1c3b;
+      --border:           #2a2f3a;
+      --code-bg:          #161b25;
+      --blockquote-bg:    #1c1917;
+      --blockquote-border:#d97706;
+      --table-stripe:     #141820;
+      --shadow:           0 1px 3px rgba(0,0,0,0.4);
     }
   }
+
+  /* ── Reset ─────────────────────────────────────────────────────────────── */
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html { scroll-behavior: smooth; }
   body {
@@ -40,15 +46,82 @@
     background: var(--bg);
     color: var(--fg);
     line-height: 1.7;
+  }
+
+  /* ── Layout ─────────────────────────────────────────────────────────────── */
+  #wrapper {
+    display: flex;
+    align-items: flex-start;
+    max-width: 1160px;
+    margin: 0 auto;
+    padding: 0 1rem;
+  }
+
+  /* ── Sidebar ────────────────────────────────────────────────────────────── */
+  #sidebar {
+    width: var(--sidebar-w);
+    flex-shrink: 0;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 2rem 1rem 2rem 0;
+    border-right: 1px solid var(--border);
+    scrollbar-width: thin;
+  }
+  #sidebar-title {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 0.75rem;
+  }
+  #toc-list {
+    list-style: none;
     padding: 0;
   }
-  #content {
-    max-width: 860px;
-    margin: 0 auto;
-    padding: 2rem 2rem 6rem;
+  #toc-list li a {
+    display: block;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.82rem;
+    color: var(--muted);
+    text-decoration: none;
+    transition: color 0.15s, background 0.15s;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
-  h1 { font-size: 2.2rem; margin: 0 0 0.5rem; border-bottom: 2px solid var(--accent); padding-bottom: 0.4rem; }
-  h2 { font-size: 1.6rem; margin: 2.5rem 0 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; }
+  #toc-list li a:hover,
+  #toc-list li.active a {
+    color: var(--accent);
+    background: var(--accent-light);
+  }
+  #toc-list li.toc-h3 a { padding-left: 1.25rem; font-size: 0.78rem; }
+
+  /* ── Main content ───────────────────────────────────────────────────────── */
+  #content {
+    flex: 1;
+    min-width: 0;
+    padding: 2rem 0 6rem 2.5rem;
+    max-width: 860px;
+  }
+
+  /* ── Typography ─────────────────────────────────────────────────────────── */
+  h1 {
+    font-size: 2.2rem;
+    margin: 0 0 0.5rem;
+    border-bottom: 2px solid var(--accent);
+    padding-bottom: 0.4rem;
+    letter-spacing: -0.02em;
+  }
+  h2 {
+    font-size: 1.6rem;
+    margin: 2.5rem 0 1rem;
+    border-bottom: 1px solid rgba(235, 28, 59, 0.25);
+    padding-bottom: 0.3rem;
+  }
   h3 { font-size: 1.25rem; margin: 2rem 0 0.75rem; }
   h4 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
   p { margin: 0.75rem 0; }
@@ -57,12 +130,25 @@
   li > ul, li > ol { margin: 0.2rem 0 0.2rem 1.2rem; }
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
+
+  /* ── Badges (img in first p) ────────────────────────────────────────────── */
+  #content > p:first-of-type img,
+  #content img[src*="shields.io"],
+  #content img[src*="drive.google.com"] {
+    display: inline;
+    vertical-align: middle;
+    margin: 0 0.15rem 0.2rem 0;
+  }
+
+  /* ── Code ───────────────────────────────────────────────────────────────── */
   code {
     font-family: "SF Mono", "Fira Code", "Cascadia Code", Menlo, Consolas, monospace;
-    font-size: 0.88em;
-    background: var(--code-bg);
+    font-size: 0.85em;
+    background: var(--accent-light);
+    color: var(--accent-dark);
     padding: 0.15em 0.4em;
     border-radius: 4px;
+    border: 1px solid rgba(235, 28, 59, 0.15);
   }
   pre {
     background: var(--code-bg);
@@ -73,7 +159,16 @@
     margin: 1rem 0;
     box-shadow: var(--shadow);
   }
-  pre code { background: none; padding: 0; font-size: 0.85em; line-height: 1.5; }
+  pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--fg);
+    font-size: 0.84em;
+    line-height: 1.65;
+  }
+
+  /* ── Tables ─────────────────────────────────────────────────────────────── */
   table {
     width: 100%;
     border-collapse: collapse;
@@ -84,8 +179,20 @@
     overflow: hidden;
   }
   th, td { padding: 0.6rem 0.8rem; text-align: left; border-bottom: 1px solid var(--border); }
-  th { background: var(--code-bg); font-weight: 600; white-space: nowrap; }
+  th {
+    background: var(--accent-light);
+    font-weight: 600;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    color: var(--accent-dark);
+  }
   tr:nth-child(even) td { background: var(--table-stripe); }
+  tr:hover td { background: var(--accent-light); transition: background 0.1s; }
+  td strong { color: var(--accent); font-weight: 600; }
+
+  /* ── Blockquote ─────────────────────────────────────────────────────────── */
   blockquote {
     background: var(--blockquote-bg);
     border-left: 4px solid var(--blockquote-border);
@@ -95,6 +202,8 @@
   }
   blockquote p { margin: 0.3rem 0; }
   hr { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
+
+  /* ── Details/summary ────────────────────────────────────────────────────── */
   details {
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -104,7 +213,8 @@
   }
   summary { cursor: pointer; font-weight: 600; padding: 0.2rem 0; }
   details[open] summary { margin-bottom: 0.8rem; }
-  td strong { color: var(--accent); font-weight: 600; }
+
+  /* ── Back to top ────────────────────────────────────────────────────────── */
   #back-to-top {
     position: fixed;
     bottom: 1.5rem;
@@ -119,72 +229,138 @@
     justify-content: center;
     font-size: 1.3rem;
     text-decoration: none;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    box-shadow: 0 2px 8px rgba(235,28,59,0.35);
     opacity: 0;
-    transition: opacity 0.3s;
+    transition: opacity 0.3s, transform 0.2s;
     pointer-events: none;
   }
   #back-to-top.visible { opacity: 1; pointer-events: auto; }
   #back-to-top:hover { text-decoration: none; transform: scale(1.1); }
+
+  /* ── Loading state ──────────────────────────────────────────────────────── */
   #loading { text-align: center; padding: 4rem 0; color: var(--muted); font-size: 1.1rem; }
+
+  /* ── Responsive: hide sidebar on small screens ──────────────────────────── */
+  @media (max-width: 900px) {
+    #sidebar { display: none; }
+    #content { padding-left: 0; }
+  }
   @media print {
-    body { padding: 0; }
+    #sidebar, #back-to-top { display: none; }
     #content { max-width: 100%; padding: 1rem; }
-    #back-to-top { display: none; }
     pre { white-space: pre-wrap; word-wrap: break-word; }
   }
 </style>
 </head>
 <body>
 
-<div id="content">
-  <div id="loading">Loading documentation...</div>
+<div id="wrapper">
+  <nav id="sidebar">
+    <div id="sidebar-title">Contents</div>
+    <ul id="toc-list"></ul>
+  </nav>
+
+  <main id="content">
+    <div id="loading">Loading documentation...</div>
+  </main>
 </div>
 
 <a href="#" id="back-to-top" title="Back to top">&#8593;</a>
 
-<!-- marked.js v15 (MIT) — inlined for offline use -->
 <script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
 <script>
-(function() {
+(function () {
   var contentEl = document.getElementById('content');
   var backToTop = document.getElementById('back-to-top');
+  var tocList   = document.getElementById('toc-list');
 
-  window.addEventListener('scroll', function() {
+  window.addEventListener('scroll', function () {
     backToTop.classList.toggle('visible', window.scrollY > 400);
+    highlightTOC();
   });
 
-  // Try fetch first (works when served over HTTP), fall back to embedded markdown
-  fetch('README.md')
-    .then(function(res) {
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      return res.text();
-    })
-    .then(function(md) { contentEl.innerHTML = marked.parse(md); })
-    .catch(function() {
-      // Use the embedded copy
-      var embedded = document.getElementById('readme-source');
-      if (embedded) {
-        contentEl.innerHTML = marked.parse(embedded.textContent);
-      } else {
-        contentEl.innerHTML = '<h1>MIDI-GPT for REAPER</h1><p>Could not load documentation.</p>';
+  function render(md) {
+    contentEl.innerHTML = marked.parse(md);
+    buildTOC();
+  }
+
+  function buildTOC() {
+    tocList.innerHTML = '';
+    var headings = contentEl.querySelectorAll('h2, h3');
+    headings.forEach(function (h) {
+      if (!h.id) {
+        h.id = h.textContent.trim().toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
       }
+      var li = document.createElement('li');
+      li.className = h.tagName === 'H3' ? 'toc-h3' : 'toc-h2';
+      li.dataset.target = h.id;
+      var a = document.createElement('a');
+      a.href = '#' + h.id;
+      a.textContent = h.textContent;
+      li.appendChild(a);
+      tocList.appendChild(li);
     });
+  }
+
+  function highlightTOC() {
+    var items = tocList.querySelectorAll('li[data-target]');
+    var scrollY = window.scrollY + 80;
+    var active = null;
+    items.forEach(function (li) {
+      var el = document.getElementById(li.dataset.target);
+      if (el && el.offsetTop <= scrollY) active = li;
+    });
+    items.forEach(function (li) { li.classList.remove('active'); });
+    if (active) active.classList.add('active');
+  }
+
+  // Fetch all three docs and concatenate; fall back to embedded on file://
+  var sources = ['README.md', 'INSTRUMENTS.md', 'VST.md'];
+  Promise.all(sources.map(function (f) {
+    return fetch(f).then(function (r) {
+      return r.ok ? r.text() : Promise.reject();
+    });
+  }))
+  .then(function (parts) {
+    render(parts.join('\n\n---\n\n'));
+  })
+  .catch(function () {
+    var embedded = document.getElementById('readme-source');
+    if (embedded) {
+      render(embedded.textContent);
+    } else {
+      contentEl.innerHTML = '<h1>MIDI-GPT for REAPER</h1><p>Could not load documentation.</p>';
+    }
+  });
 })();
 </script>
 
 <!--
-  Embedded README.md — this is read by the script above when the page is
-  opened directly from the filesystem (file:// URLs block fetch).
-  To update: replace everything between the script tags below with the
-  current README.md content, or run: python build_docs.py
+  Embedded content (README + INSTRUMENTS + VST) — used when the page is
+  opened from the filesystem (file:// blocks fetch). Run: python build_docs.py
 -->
 <script id="readme-source" type="text/plain">
+[![Metacreation Lab](https://drive.google.com/uc?export=view&id=1nzeq0DmD7hAYteRs5PA42150HIzO3Sz7)](https://metacreation.net/category/projects/)
+
 # MIDI-GPT for REAPER
 
-AI-powered multi-track MIDI generation plugin for [REAPER](https://www.reaper.fm/). Select bars, run the action, and the model fills in musically coherent MIDI — respecting your arrangement, instruments, and per-track controls.
+[![License: MIT](https://img.shields.io/github/license/Metacreation-Lab/midigpt-REAPER)](LICENSE)
+[![REAPER](https://img.shields.io/badge/REAPER-v6%2B-5C2D91)](https://www.reaper.fm/)
+[![Python](https://img.shields.io/badge/python-3.10--3.12-3776ab)](https://www.python.org/downloads/)
+[![Powered by MIDI-GPT](https://img.shields.io/badge/powered%20by-MIDI--GPT-eb1c3b)](https://github.com/Metacreation-Lab/MIDI-GPT)
+[![arXiv](https://img.shields.io/badge/arXiv-2501.17011-b31b1b)](https://arxiv.org/abs/2501.17011)
+[![HuggingFace](https://img.shields.io/badge/HuggingFace-Metacreation%2FMIDI--GPT-FFD21E?logo=huggingface&logoColor=000)](https://huggingface.co/Metacreation/MIDI-GPT)
 
-Built on [MIDI-GPT](https://github.com/DaoTwenty/MIDI-GPT) (GPT-2 Transformer for symbolic music) with a stateless HTTP API.
+AI-powered multi-track MIDI generation plugin for [REAPER](https://www.reaper.fm/), built on the [MIDI-GPT](https://github.com/Metacreation-Lab/MIDI-GPT) transformer model.
+
+- **Fill in missing bars** — select a region and the model generates notes that fit your existing arrangement
+- **Generate new tracks** — create empty bars, name the track by instrument, and let the model compose from scratch
+- **Steer the output** — control density, polyphony, and note duration per track with JSFX sliders
+- **Iterative refinement** — regenerate any bar, track, or region until you get what you want
+- **Context-aware** — the model reads surrounding MIDI and produces results that fit the key, groove, and texture
+
+**Related docs:** [INSTRUMENTS.md](INSTRUMENTS.md) — MIDI instrument reference and track naming keywords · [VST.md](VST.md) — free VST recommendations for synthesizing all GM instruments
 
 ---
 
@@ -199,7 +375,10 @@ Built on [MIDI-GPT](https://github.com/DaoTwenty/MIDI-GPT) (GPT-2 Transformer fo
 - [Usage Tutorial](#usage-tutorial)
   - [1. Start the Server](#1-start-the-server)
   - [2. Set Up Your Session](#2-set-up-your-session)
-  - [3. Running Generation](#3-running-generation)
+  - [3. Select Context and Target Bars](#3-select-context-and-target-bars)
+  - [4. Run Generation](#4-run-generation)
+  - [Generating into Empty Tracks](#generating-into-empty-tracks)
+  - [Tips and Common Gotchas](#tips-and-common-gotchas)
 - [Controls Reference](#controls-reference)
   - [Global Options (Monitor FX or Master Track)](#global-options-monitor-fx-or-master-track)
   - [Track Options (Per-Track FX)](#track-options-per-track-fx)
@@ -283,34 +462,82 @@ If you cloned this repo and want to link a local `MIDI-GPT` backend repository:
    * Browse to: `~/Library/Application Support/REAPER/Scripts/MIDI-GPT/` (or `%APPDATA%\REAPER\Scripts\MIDI-GPT\` on Windows).
    * Select **`REAPER_midigpt_infill.py`** and click Open.
 
-2. **Add Global Options JSFX:**
-   * Open the Monitoring Effects window (**View > Monitoring Effects**) or select the Master Track.
+2. **Add Global Options JSFX (required):**
+   * Open the Monitoring Effects window (**View > Monitoring Effects**).
    * Click **Add** and search for **`JS: MIDI-GPT Global Options`**.
-   * Add it to the FX list.
+   * Add it to the Monitoring FX chain. This must be present for any generation to work.
 
-3. **Add Track Options JSFX:**
-   * On any track you want to generate/infill, add the track options JSFX.
-   * Search for **`JS: MIDI-GPT Track Options (Yellow-Ghost)`** or **`JS: MIDI-GPT Track Options (Expressive)`** depending on the active model checkpoint.
+3. **Add Track Options JSFX (optional, per track):**
+   * On tracks where you want per-track control over density, polyphony, and duration, add the track JSFX.
+   * Search for **`JS: MIDI-GPT Track Options (Yellow-Ghost)`** and add it to the track's FX chain.
+   * Tracks without this JSFX use default values inferred from existing content — see [Tips and Common Gotchas](#tips-and-common-gotchas) for when this matters.
 
 ---
 
 ## Usage Tutorial
 
 ### 1. Start the Server
-* Double-click the **`Start MIDI-GPT Server`** shortcut on your Desktop, or run:
-  ```bash
-  ./start_midigpt_server.sh
-  ```
+
+Double-click the **`Start MIDI-GPT Server`** shortcut on your Desktop, or run from the repo:
+
+```bash
+./start_midigpt_server.sh                        # Yellow model (default)
+./start_midigpt_server.sh --pretrained ghost     # Ghost model
+./start_midigpt_server.sh --ckpt /path/to/model  # Local checkpoint
+```
+
+The model is fixed for the lifetime of the server process. To switch models, stop the server and restart it with a different flag. The REAPER script auto-detects the running model via the server's `/info` endpoint and loads the correct Track Options JSFX automatically.
 
 ### 2. Set Up Your Session
-1. Create MIDI items with note context on your tracks.
-2. Select the track you want to generate on. Make sure the MIDI item(s) you wish to infill are **selected**.
-3. Create a **time selection** in the timeline covering the bars you want to generate.
 
-### 3. Running Generation
-1. Open the Action List (`?`).
-2. Run **`REAPER_midigpt_infill.py`**.
-3. The script sends the notes, reads your JSFX slider options, calls the server, and inserts the generated notes back into REAPER automatically.
+**Name your tracks** so the plugin can identify instruments. Track names are matched case-insensitively by keyword — a track named `"my piano"` or `"PIANO chords"` both resolve to piano. Unrecognized names default to piano. See [INSTRUMENTS.md](INSTRUMENTS.md) for the full keyword list.
+
+**Add MIDI context** to your tracks. The model uses surrounding notes as musical context when generating. Tracks with more coherent existing content produce more coherent output.
+
+**Add Track Options JSFX** to any track where you want explicit control over density, polyphony, and duration. This is optional for tracks with existing content, but important for empty tracks — see [Generating into Empty Tracks](#generating-into-empty-tracks).
+
+### 3. Select Context and Target Bars
+
+**Set the loop region (context window):**
+- Enable the REAPER loop and position it over the bars you want the model to use as musical context.
+- The loop region should match the model's context size (`model_dim`, shown in the Global Options JSFX — 4 bars for Yellow by default).
+- Without a loop region, the model uses the entire project as context, which is slower but still works.
+
+**Set the time selection (generation target):**
+- Draw a time selection over the bars you want to generate or infill. This is what gets replaced.
+- If a MIDI item spans multiple bars and you only want to generate part of it, **split the item first** so only the target bars fall within your time selection.
+- You can target a single bar, a horizontal range across one track, or a vertical range across multiple tracks simultaneously.
+
+### 4. Run Generation
+
+Open the Action List (`?`) and run **`Script: REAPER_midigpt_infill.py`**.
+
+The script reads your MIDI items and JSFX slider values, sends a generation request to the server, and writes the result back. Generated MIDI **replaces** whatever was in the target bars. You can run the script again to regenerate with different settings or a different random seed.
+
+### Generating into Empty Tracks
+
+When generating into bars that contain no existing MIDI, the model has no content to infer controls from. Without explicit Track Options JSFX settings, it tends toward silence or sparse output.
+
+To get useful results on empty tracks:
+
+1. Create the track, name it with an instrument keyword, and create an empty MIDI item covering the target bars.
+2. Add **Track Options JSFX** to the track and set controls appropriate to the instrument:
+
+| Instrument type | Polyphony (min/max) | Duration | Density |
+|-----------------|---------------------|----------|---------|
+| Monophonic (flute, bass, lead) | 1 / 1 | Short–medium | Low |
+| Chordal (piano, pads, guitar) | 3 / 6 | Medium–long | Medium |
+| Arpeggio | 1 / 2 | Short | Medium–high |
+| Drums | 1 / 4 | Short | High |
+
+3. Run generation. Adjust sliders and regenerate until you get the character you want.
+
+### Tips and Common Gotchas
+
+- **Loop size and model_dim**: The loop region should be exactly `model_dim` bars (check the Global Options JSFX). A mismatched loop forces the model to process more context than necessary, which slows generation.
+- **Bars per step can exceed model_dim**: You can generate more bars than `model_dim` in one run. The model steps through the target bars sequentially at `model_dim`-sized increments.
+- **No Track FX on empty bars**: Without Track FX, controls are inferred from existing content. On empty bars this biases strongly toward silence. Always add Track FX when generating into empty tracks and set polyphony, duration, and density explicitly.
+- **Instrument fallback**: Tracks with names the plugin doesn't recognize default to piano (instrument 0). If a track is generating piano-like output unexpectedly, check the track name against [INSTRUMENTS.md](INSTRUMENTS.md).
 
 ---
 
@@ -371,6 +598,343 @@ To package the plugin, scripts, installers, and documentation for release:
 ```
 This generates a ZIP file named `MIDI-GPT-for-REAPER-[DATE].zip` in the repository root.
 
+
+---
+
+# Instrument Names
+
+MIDI-GPT uses General MIDI instrument names to identify tracks. The instrument is determined by the MIDI program number set on each track in REAPER.
+
+Set the correct MIDI program on your track so the model knows what instrument it's generating for. The mapping below shows **MIDI Program Number** -> **Internal Name**.
+
+## Drums
+
+Drum tracks are detected automatically when the track's MIDI channel is set to channel 10, or the instrument number is 128 in REAPER's track info.
+
+| Program | Internal Name |
+|---------|--------------|
+| (any) | `drums` |
+
+## Piano (0-7)
+
+| Program | Internal Name |
+|---------|--------------|
+| 0 | `acoustic_grand_piano` |
+| 1 | `bright_acoustic_piano` |
+| 2 | `electric_grand_piano` |
+| 3 | `honky_tonk_piano` |
+| 4 | `electric_piano_1` |
+| 5 | `electric_piano_2` |
+| 6 | `harpsichord` |
+| 7 | `clavi` |
+
+## Chromatic Percussion (8-15)
+
+| Program | Internal Name |
+|---------|--------------|
+| 8 | `celesta` |
+| 9 | `glockenspiel` |
+| 10 | `music_box` |
+| 11 | `vibraphone` |
+| 12 | `marimba` |
+| 13 | `xylophone` |
+| 14 | `tubular_bells` |
+| 15 | `dulcimer` |
+
+## Organ (16-23)
+
+| Program | Internal Name |
+|---------|--------------|
+| 16 | `drawbar_organ` |
+| 17 | `percussive_organ` |
+| 18 | `rock_organ` |
+| 19 | `church_organ` |
+| 20 | `reed_organ` |
+| 21 | `accordion` |
+| 22 | `harmonica` |
+| 23 | `tango_accordion` |
+
+## Guitar (24-31)
+
+| Program | Internal Name |
+|---------|--------------|
+| 24 | `acoustic_guitar_nylon` |
+| 25 | `acoustic_guitar_steel` |
+| 26 | `electric_guitar_jazz` |
+| 27 | `electric_guitar_clean` |
+| 28 | `electric_guitar_muted` |
+| 29 | `overdriven_guitar` |
+| 30 | `distortion_guitar` |
+| 31 | `guitar_harmonics` |
+
+## Bass (32-39)
+
+| Program | Internal Name |
+|---------|--------------|
+| 32 | `acoustic_bass` |
+| 33 | `electric_bass_finger` |
+| 34 | `electric_bass_pick` |
+| 35 | `fretless_bass` |
+| 36 | `slap_bass_1` |
+| 37 | `slap_bass_2` |
+| 38 | `synth_bass_1` |
+| 39 | `synth_bass_2` |
+
+## Strings (40-47)
+
+| Program | Internal Name |
+|---------|--------------|
+| 40 | `violin` |
+| 41 | `viola` |
+| 42 | `cello` |
+| 43 | `contrabass` |
+| 44 | `tremolo_strings` |
+| 45 | `pizzicato_strings` |
+| 46 | `orchestral_harp` |
+| 47 | `timpani` |
+
+## Ensemble (48-55)
+
+| Program | Internal Name |
+|---------|--------------|
+| 48 | `string_ensemble_1` |
+| 49 | `string_ensemble_2` |
+| 50 | `synth_strings_1` |
+| 51 | `synth_strings_2` |
+| 52 | `choir_aahs` |
+| 53 | `voice_oohs` |
+| 54 | `synth_voice` |
+| 55 | `orchestra_hit` |
+
+## Brass (56-63)
+
+| Program | Internal Name |
+|---------|--------------|
+| 56 | `trumpet` |
+| 57 | `trombone` |
+| 58 | `tuba` |
+| 59 | `muted_trumpet` |
+| 60 | `french_horn` |
+| 61 | `brass_section` |
+| 62 | `synth_brass_1` |
+| 63 | `synth_brass_2` |
+
+## Reed (64-71)
+
+| Program | Internal Name |
+|---------|--------------|
+| 64 | `soprano_sax` |
+| 65 | `alto_sax` |
+| 66 | `tenor_sax` |
+| 67 | `baritone_sax` |
+| 68 | `oboe` |
+| 69 | `english_horn` |
+| 70 | `bassoon` |
+| 71 | `clarinet` |
+
+## Pipe (72-79)
+
+| Program | Internal Name |
+|---------|--------------|
+| 72 | `piccolo` |
+| 73 | `flute` |
+| 74 | `recorder` |
+| 75 | `pan_flute` |
+| 76 | `blown_bottle` |
+| 77 | `shakuhachi` |
+| 78 | `whistle` |
+| 79 | `ocarina` |
+
+## Synth Lead (80-87)
+
+| Program | Internal Name |
+|---------|--------------|
+| 80 | `lead_1_square` |
+| 81 | `lead_2_sawtooth` |
+| 82 | `lead_3_calliope` |
+| 83 | `lead_4_chiff` |
+| 84 | `lead_5_charang` |
+| 85 | `lead_6_voice` |
+| 86 | `lead_7_fifths` |
+| 87 | `lead_8_bass__lead` |
+
+## Synth Pad (88-95)
+
+| Program | Internal Name |
+|---------|--------------|
+| 88 | `pad_1_new_age` |
+| 89 | `pad_2_warm` |
+| 90 | `pad_3_polysynth` |
+| 91 | `pad_4_choir` |
+| 92 | `pad_5_bowed` |
+| 93 | `pad_6_metallic` |
+| 94 | `pad_7_halo` |
+| 95 | `pad_8_sweep` |
+
+## Synth Effects (96-103)
+
+| Program | Internal Name |
+|---------|--------------|
+| 96 | `fx_1_rain` |
+| 97 | `fx_2_soundtrack` |
+| 98 | `fx_3_crystal` |
+| 99 | `fx_4_atmosphere` |
+| 100 | `fx_5_brightness` |
+| 101 | `fx_6_goblins` |
+| 102 | `fx_7_echoes` |
+| 103 | `fx_8_sci_fi` |
+
+## Ethnic (104-111)
+
+| Program | Internal Name |
+|---------|--------------|
+| 104 | `sitar` |
+| 105 | `banjo` |
+| 106 | `shamisen` |
+| 107 | `koto` |
+| 108 | `kalimba` |
+| 109 | `bag_pipe` |
+| 110 | `fiddle` |
+| 111 | `shanai` |
+
+## Percussive (112-119)
+
+| Program | Internal Name |
+|---------|--------------|
+| 112 | `tinkle_bell` |
+| 113 | `agogo` |
+| 114 | `steel_drums` |
+| 115 | `woodblock` |
+| 116 | `taiko_drum` |
+| 117 | `melodic_tom` |
+| 118 | `synth_drum` |
+| 119 | `reverse_cymbal` |
+
+## Sound Effects (120-127)
+
+| Program | Internal Name |
+|---------|--------------|
+| 120 | `guitar_fret_noise` |
+| 121 | `breath_noise` |
+| 122 | `seashore` |
+| 123 | `bird_tweet` |
+| 124 | `telephone_ring` |
+| 125 | `helicopter` |
+| 126 | `applause` |
+| 127 | `gunshot` |
+
+## Tips
+
+- The model was trained on General MIDI data, so it performs best with standard GM instruments.
+- **Piano, guitar, bass, strings, and drums** are the most commonly represented in the training data and tend to produce the best results.
+- If you're using a synth or non-GM instrument, pick the closest GM program number for best generation quality.
+- You don't need to name your tracks — the MIDI program number is what matters. Track names are for your own reference.
+
+
+---
+
+# README — Recommended Instrument Setup (REAPER)
+
+---
+
+## Required Components
+
+### 1. Sforzando (SFZ Player)
+
+Download:
+[https://www.plogue.com/francais/telechargements.html#sforzando](https://www.plogue.com/francais/telechargements.html#sforzando)
+
+* Free SFZ sampler plugin (VST/AU)
+* Used to load and play the General MIDI soundfont
+
+---
+
+### 2. Arachno SoundFont (GM Bank)
+
+Download:
+[https://www.arachnosoft.com/main/download.php?id=soundfont-sf2](https://www.arachnosoft.com/main/download.php?id=soundfont-sf2)
+
+* Complete **General MIDI soundfont**
+* Covers all **128 GM instruments (programs 0–127)** + drum kits
+* Provides the mapping required by this project
+
+---
+
+### 3. MT Power Drum Kit 2 (Drums)
+
+Download:
+[https://www.powerdrumkit.com/download76187.php](https://www.powerdrumkit.com/download76187.php)
+
+* High-quality acoustic drum plugin (VST/AU)
+* Used instead of GM drums for better realism
+
+---
+
+## Installation
+
+### Step 1 — Install Plugins
+
+1. Install **Sforzando**
+2. Install **MT Power Drum Kit 2**
+3. Place the **Arachno `.sf2` file** in a known location (e.g., `Documents/SoundFonts/`)
+
+---
+
+### Step 2 — Rescan Plugins in REAPER
+
+After installation:
+
+1. Open REAPER
+2. Go to:
+   `Options → Preferences → Plug-ins → VST`
+3. Click:
+
+   * **“Re-scan”** 
+
+This ensures REAPER detects newly installed VST instruments.
+
+---
+
+## Usage
+
+### Using VST Instruments in REAPER
+
+1. Create a new track
+2. Click the **FX** button on the track
+3. Search for the plugin (e.g., *Sforzando*, *MT Power Drum Kit*)
+4. Double-click to load it
+
+* Go to `Options → Preferences → Plug-ins → VST`
+* Click **Re-scan** or **Clear cache / re-scan**
+
+### Load General MIDI Instruments (Sforzando + Arachno)
+
+1. Create a new track
+2. Add **Sforzando** as an FX instrument
+3. Inside Sforzando:
+
+    * Click on `Intrument → import` then select the **Arachno `.sf2` file**
+    * Select an instrument by clicking on `Intrument → converted → sf2 → ...`
+
+* Each program number corresponds to a GM instrument
+* This mapping is required for correct playback of generated MIDI
+
+---
+
+### Load Drums (MT Power Drum Kit)
+
+1. Create a separate track
+2. Add **MT Power Drum Kit 2**
+3. Route drum MIDI (typically channel 10) to this track
+
+---
+
+## Recommended Track Layout
+
+* Track 1: **Sforzando (GM instruments)**
+* Track 2: **MT Power Drum Kit (drums)**
+
+---
 </script>
 </body>
 </html>
