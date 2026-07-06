@@ -1,4 +1,4 @@
-[![Metacreation Lab](docs/assets/logo.svg)](https://metacreation.net/category/projects/)
+[![Metacreation Lab](https://drive.google.com/uc?export=view&id=1nzeq0DmD7hAYteRs5PA42150HIzO3Sz7)](https://metacreation.net/category/projects/)
 
 # MIDI-GPT for REAPER
 
@@ -23,25 +23,28 @@ AI-powered multi-track MIDI generation plugin for [REAPER](https://www.reaper.fm
 
 ## Table of Contents
 
-- [How It Works](#how-it-works)
-- [Requirements](#requirements)
-- [Installation](#installation)
-  - [Quick Install (Release Package)](#quick-install-release-package)
-  - [Install from Source](#install-from-source)
-- [REAPER Setup](#reaper-setup)
-- [Usage Tutorial](#usage-tutorial)
-  - [1. Start the Server](#1-start-the-server)
-  - [2. Set Up Your Session](#2-set-up-your-session)
-  - [3. Select Context and Target Bars](#3-select-context-and-target-bars)
-  - [4. Run Generation](#4-run-generation)
-  - [Generating into Empty Tracks](#generating-into-empty-tracks)
-  - [Tips and Common Gotchas](#tips-and-common-gotchas)
-- [Controls Reference](#controls-reference)
-  - [Global Options (Monitor FX or Master Track)](#global-options-monitor-fx-or-master-track)
-  - [Track Options (Per-Track FX)](#track-options-per-track-fx)
-- [Running Tests](#running-tests)
-- [Building a Release Package](#building-a-release-package)
-- [Project Structure](#project-structure)
+- [MIDI-GPT for REAPER](#midi-gpt-for-reaper)
+  - [Table of Contents](#table-of-contents)
+  - [How It Works](#how-it-works)
+  - [Requirements](#requirements)
+  - [Installation](#installation)
+    - [Quick Install (Release Package)](#quick-install-release-package)
+    - [Install from Source](#install-from-source)
+  - [REAPER Setup](#reaper-setup)
+  - [Usage Tutorial](#usage-tutorial)
+    - [1. Start the Server](#1-start-the-server)
+    - [2. Set Up Your Session](#2-set-up-your-session)
+    - [3. Select Context and Target Bars](#3-select-context-and-target-bars)
+    - [4. Run Generation](#4-run-generation)
+    - [Generating into Empty Tracks](#generating-into-empty-tracks)
+    - [Tips and Common Gotchas](#tips-and-common-gotchas)
+  - [Controls Reference](#controls-reference)
+    - [Global Options (Monitor FX or Master Track)](#global-options-monitor-fx-or-master-track)
+    - [Track Options (Per-Track FX)](#track-options-per-track-fx)
+      - [Yellow-Ghost Model Parameters](#yellow-ghost-model-parameters)
+      - [Expressive Model Parameters](#expressive-model-parameters)
+  - [Running Tests](#running-tests)
+  - [Building a Release Package](#building-a-release-package)
 
 ---
 
