@@ -23,6 +23,7 @@ src/Scripts/composers_assistant_v2/models_permuted_labels/
 *.zip
 *.xml
 *.html
+!/docs/index.html
 /tmp
 
 # Dev / CI artifacts

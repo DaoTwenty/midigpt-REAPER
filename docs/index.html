@@ -1,3 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MIDI-GPT for REAPER — Documentation</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1a1a2e;
+    --muted: #555;
+    --accent: #2563eb;
+    --accent-light: #dbeafe;
+    --border: #e2e8f0;
+    --code-bg: #f1f5f9;
+    --blockquote-bg: #fffbeb;
+    --blockquote-border: #f59e0b;
+    --table-stripe: #f8fafc;
+    --shadow: 0 1px 3px rgba(0,0,0,0.08);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f172a;
+      --fg: #e2e8f0;
+      --muted: #94a3b8;
+      --accent: #60a5fa;
+      --accent-light: #1e3a5f;
+      --border: #334155;
+      --code-bg: #1e293b;
+      --blockquote-bg: #1c1917;
+      --blockquote-border: #d97706;
+      --table-stripe: #1e293b;
+      --shadow: 0 1px 3px rgba(0,0,0,0.3);
+    }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.7;
+    padding: 0;
+  }
+  #content {
+    max-width: 860px;
+    margin: 0 auto;
+    padding: 2rem 2rem 6rem;
+  }
+  h1 { font-size: 2.2rem; margin: 0 0 0.5rem; border-bottom: 2px solid var(--accent); padding-bottom: 0.4rem; }
+  h2 { font-size: 1.6rem; margin: 2.5rem 0 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; }
+  h3 { font-size: 1.25rem; margin: 2rem 0 0.75rem; }
+  h4 { font-size: 1.1rem; margin: 1.5rem 0 0.5rem; }
+  p { margin: 0.75rem 0; }
+  ul, ol { margin: 0.75rem 0 0.75rem 1.5rem; }
+  li { margin: 0.3rem 0; }
+  li > ul, li > ol { margin: 0.2rem 0 0.2rem 1.2rem; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code {
+    font-family: "SF Mono", "Fira Code", "Cascadia Code", Menlo, Consolas, monospace;
+    font-size: 0.88em;
+    background: var(--code-bg);
+    padding: 0.15em 0.4em;
+    border-radius: 4px;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    overflow-x: auto;
+    margin: 1rem 0;
+    box-shadow: var(--shadow);
+  }
+  pre code { background: none; padding: 0; font-size: 0.85em; line-height: 1.5; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    font-size: 0.92em;
+    box-shadow: var(--shadow);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  th, td { padding: 0.6rem 0.8rem; text-align: left; border-bottom: 1px solid var(--border); }
+  th { background: var(--code-bg); font-weight: 600; white-space: nowrap; }
+  tr:nth-child(even) td { background: var(--table-stripe); }
+  blockquote {
+    background: var(--blockquote-bg);
+    border-left: 4px solid var(--blockquote-border);
+    padding: 0.8rem 1.2rem;
+    margin: 1rem 0;
+    border-radius: 0 8px 8px 0;
+  }
+  blockquote p { margin: 0.3rem 0; }
+  hr { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
+  details {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.8rem 1.2rem;
+    margin: 1rem 0;
+    background: var(--table-stripe);
+  }
+  summary { cursor: pointer; font-weight: 600; padding: 0.2rem 0; }
+  details[open] summary { margin-bottom: 0.8rem; }
+  td strong { color: var(--accent); font-weight: 600; }
+  #back-to-top {
+    position: fixed;
+    bottom: 1.5rem;
+    right: 1.5rem;
+    background: var(--accent);
+    color: #fff;
+    width: 42px;
+    height: 42px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.3rem;
+    text-decoration: none;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+  }
+  #back-to-top.visible { opacity: 1; pointer-events: auto; }
+  #back-to-top:hover { text-decoration: none; transform: scale(1.1); }
+  #loading { text-align: center; padding: 4rem 0; color: var(--muted); font-size: 1.1rem; }
+  @media print {
+    body { padding: 0; }
+    #content { max-width: 100%; padding: 1rem; }
+    #back-to-top { display: none; }
+    pre { white-space: pre-wrap; word-wrap: break-word; }
+  }
+</style>
+</head>
+<body>
+
+<div id="content">
+  <div id="loading">Loading documentation...</div>
+</div>
+
+<a href="#" id="back-to-top" title="Back to top">&#8593;</a>
+
+<!-- marked.js v15 (MIT) — inlined for offline use -->
+<script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
+<script>
+(function() {
+  var contentEl = document.getElementById('content');
+  var backToTop = document.getElementById('back-to-top');
+
+  window.addEventListener('scroll', function() {
+    backToTop.classList.toggle('visible', window.scrollY > 400);
+  });
+
+  // Try fetch first (works when served over HTTP), fall back to embedded markdown
+  fetch('README.md')
+    .then(function(res) {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.text();
+    })
+    .then(function(md) { contentEl.innerHTML = marked.parse(md); })
+    .catch(function() {
+      // Use the embedded copy
+      var embedded = document.getElementById('readme-source');
+      if (embedded) {
+        contentEl.innerHTML = marked.parse(embedded.textContent);
+      } else {
+        contentEl.innerHTML = '<h1>MIDI-GPT for REAPER</h1><p>Could not load documentation.</p>';
+      }
+    });
+})();
+</script>
+
+<!--
+  Embedded README.md — this is read by the script above when the page is
+  opened directly from the filesystem (file:// URLs block fetch).
+  To update: replace everything between the script tags below with the
+  current README.md content, or run: python build_docs.py
+-->
+<script id="readme-source" type="text/plain">
 # MIDI-GPT for REAPER
 
 AI-powered multi-track MIDI generation plugin for [REAPER](https://www.reaper.fm/). Select bars, run the action, and the model fills in musically coherent MIDI — respecting your arrangement, instruments, and per-track controls.
@@ -188,3 +370,7 @@ To package the plugin, scripts, installers, and documentation for release:
 ./build_release.sh
 ```
 This generates a ZIP file named `MIDI-GPT-for-REAPER-[DATE].zip` in the repository root.
+
+</script>
+</body>
+</html>
