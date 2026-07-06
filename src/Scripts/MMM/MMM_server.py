@@ -18,7 +18,18 @@ from collections import defaultdict, deque
 from xmlrpc.server import SimpleXMLRPCServer
 
 from symusic import Score, Track, Note, Tempo, TimeSignature
-import mmm_refactored
+
+# Backend selection.  Set MMM_BACKEND=refactor to route inference through the
+# pure-Python midigpt_refactor library instead of the C++ mmm_refactored
+# extension.  Both backends expose the same three symbols used below:
+#   - ElVelocityDurationPolyphonyYellowEncoder (with midi_to_json / json_to_midi)
+#   - sample_multi_step(piece_json, status_json, param_json)
+if os.environ.get("MMM_BACKEND", "").lower() == "refactor":
+    # Make sibling modules importable when run as a script.
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import mmm_refactored_shim as mmm_refactored  # type: ignore[no-redef]
+else:
+    import mmm_refactored
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +132,16 @@ def initialize_model(model_config_path: str = None) -> bool:
     try:
         cfg = _load_model_config()
 
-        ckpt = cfg["ckpt"]
+        # Pick the right checkpoint for the active backend.  When MMM_BACKEND=refactor
+        # the midigpt_refactor library is used; it needs its own checkpoint + encoder
+        # config (`refactor_ckpt` / `refactor_encoder_config`).  The shim reads
+        # `refactor_encoder_config` directly from MODEL_CONFIG at engine-build time.
+        use_refactor = os.environ.get("MMM_BACKEND", "").lower() == "refactor"
+        ckpt = cfg.get("refactor_ckpt") if use_refactor else None
+        if not ckpt:
+            ckpt = cfg["ckpt"]
+        ckpt = os.path.expanduser(ckpt)
+
         # Resolve relative paths against config file directory
         base_dir = os.path.dirname(os.path.abspath(MODEL_CONFIG_PATH))
         if not os.path.isabs(ckpt):
@@ -570,6 +590,10 @@ def _build_param(job, *, use_per_track_temperature: bool = False) -> dict:
     model_dim     = int(cfg.get("model_dim", 4))
     bars_per_step = min(int(cfg.get("bars_per_step", 1)), model_dim)
 
+    # Only inject refactor_encoder_config for the midigpt_refactor backend —
+    # the C++ mmm_refactored HyperParam protobuf rejects unknown fields.
+    use_refactor = os.environ.get("MMM_BACKEND", "").lower() == "refactor"
+
     param = {
         "ckpt"                    : CKPT_PATH,
         "model_dim"               : model_dim,
@@ -585,6 +609,11 @@ def _build_param(job, *, use_per_track_temperature: bool = False) -> dict:
         "polyphony_hard_limit"    : polyphony_limit,
         "mask_top_k"              : mask_top_k,
     }
+
+    if use_refactor:
+        enc_cfg = MODEL_CONFIG.get("refactor_encoder_config", "")
+        if enc_cfg:
+            param["refactor_encoder_config"] = os.path.expanduser(enc_cfg)
 
     return param
 

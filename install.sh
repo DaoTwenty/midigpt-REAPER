@@ -36,6 +36,14 @@ if [ -z "$MMM_ZIP_LOCAL" ] && [ -f "$REPO_DIR/mmm_refactored.zip" ]; then
     MMM_ZIP_LOCAL="$REPO_DIR/mmm_refactored.zip"
 fi
 
+# midigpt_refactor — pure-Python alternative backend (selected at runtime via
+# MMM_BACKEND=refactor).  Set via --midigpt-refactor=PATH or auto-detected at
+# the sibling path ../MIDI-GPT/midigpt_refactor.
+MIDIGPT_REFACTOR_SRC=""
+if [ -d "$REPO_DIR/../MIDI-GPT/midigpt_refactor" ]; then
+    MIDIGPT_REFACTOR_SRC="$(cd "$REPO_DIR/../MIDI-GPT/midigpt_refactor" && pwd)"
+fi
+
 # ── Colors ──────────────────────────────────────────────────────
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -71,6 +79,9 @@ for arg in "$@"; do
         --mmm-zip=*)
             MMM_ZIP_LOCAL="${arg#*=}"
             ;;
+        --midigpt-refactor=*)
+            MIDIGPT_REFACTOR_SRC="${arg#*=}"
+            ;;
         --help|-h)
             echo "MIDI-GPT for REAPER — Installer"
             echo ""
@@ -80,6 +91,10 @@ for arg in "$@"; do
             echo "  --skip-deps          Skip system dependency check"
             echo "  --skip-reaper-config Skip automatic REAPER Python/ReaScript configuration"
             echo "  --mmm-zip=PATH       Use a local mmm_refactored zip instead of downloading"
+            echo "  --midigpt-refactor=PATH"
+            echo "                       Path to the midigpt_refactor source repo (pure-Python"
+            echo "                       backend, enabled at runtime with MMM_BACKEND=refactor)."
+            echo "                       Auto-detected at ../MIDI-GPT/midigpt_refactor."
             echo "  --help               Show this help"
             echo ""
             echo "Examples:"
@@ -366,7 +381,13 @@ else
             echo "    1. Set the download URL in install.sh (MMM_ZIP_URL variable)"
             echo "    2. Pass a local zip file:  ./install.sh --mmm-zip=/path/to/mmm_refactored.zip"
             echo ""
-            fail "No MMM Refactored source available."
+            if [ -n "$MIDIGPT_REFACTOR_SRC" ] && [ -d "$MIDIGPT_REFACTOR_SRC" ]; then
+                warn "Skipping mmm_refactored — will install midigpt_refactor as the only backend"
+                warn "  Launch the server with: MMM_BACKEND=refactor ./start_mmm_server.sh"
+                SKIP_MMM_REFACTORED=true
+            else
+                fail "No MMM Refactored source available."
+            fi
         fi
 
         info "Downloading MMM Refactored archive..."
@@ -453,6 +474,34 @@ info "Installing Python dependencies..."
 pip install -e "$REPO_DIR" -q 2>/dev/null || pip install -e "$REPO_DIR"
 pip install symusic -q
 ok "Python dependencies installed"
+
+# -- Install midigpt_refactor (pure-Python alternative backend) --
+# Used when MMM_server.py is launched with MMM_BACKEND=refactor.
+# The C++ extension `_core` is built via scikit-build-core.
+if [ -n "$MIDIGPT_REFACTOR_SRC" ]; then
+    if [ -d "$MIDIGPT_REFACTOR_SRC" ]; then
+        if python -c "from midigpt_refactor.inference.engine import InferenceEngine" 2>/dev/null; then
+            ok "midigpt_refactor already installed"
+        else
+            info "Installing midigpt_refactor[inference] from $MIDIGPT_REFACTOR_SRC ..."
+            CMAKE_ARGS="-DCMAKE_POLICY_VERSION_MINIMUM=3.5" \
+                pip install -e "${MIDIGPT_REFACTOR_SRC}[inference]" --no-build-isolation 2>&1 | tail -5
+            # tqdm is imported by midigpt_refactor.inference.session but not
+            # declared in pyproject's [inference] extras yet.
+            pip install tqdm -q
+            if python -c "from midigpt_refactor.inference.engine import InferenceEngine" 2>/dev/null; then
+                ok "midigpt_refactor installed (Python backend available)"
+            else
+                warn "midigpt_refactor install failed — only the C++ backend will be available"
+            fi
+        fi
+    else
+        warn "midigpt_refactor path not found: $MIDIGPT_REFACTOR_SRC"
+    fi
+else
+    info "midigpt_refactor source not detected — skipping pure-Python backend"
+    info "  (pass --midigpt-refactor=PATH to install it)"
+fi
 
 # ====================================================================
 # Step 4: REAPER Integration (Symlinks)
