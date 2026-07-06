@@ -221,108 +221,40 @@ if (Test-Path $VenvDir) {
     Write-OK "Created and activated venv at $VenvDir"
 }
 
-Write-Info "Checking PyTorch..."
-$TorchCheck = python -c "import torch" 2>&1
-if ($LASTEXITCODE -eq 0) {
-    $TorchVer = python -c "import torch; print(torch.__version__)"
-    Write-OK "PyTorch $TorchVer already installed"
+# ====================================================================
+# Step 3: Install MIDI-GPT Backend
+# ====================================================================
+
+Write-Step "Step 3/6: Installing MIDI-GPT backend"
+
+$MidigptSibling = Join-Path (Split-Path $RepoDir -Parent) "MIDI-GPT"
+$MidigptInstalled = $false
+
+if ($MidigptRefactorSrc -and (Test-Path $MidigptRefactorSrc)) {
+    Write-Info "Installing midigpt[http,inference] from $MidigptRefactorSrc ..."
+    pip install -e "${MidigptRefactorSrc}[http,inference]" 2>&1
+    $MidigptInstalled = $true
+} elseif (Test-Path $MidigptSibling) {
+    Write-Info "Installing midigpt[http,inference] from sibling folder $MidigptSibling ..."
+    pip install -e "${MidigptSibling}[http,inference]" 2>&1
+    $MidigptInstalled = $true
 } else {
-    Write-Info "Installing PyTorch (this may take a few minutes)..."
-    pip3 install torch torchvision -q
-    $TorchVer = python -c "import torch; print(torch.__version__)"
-    Write-OK "PyTorch $TorchVer installed"
+    Write-Fail "MIDI-GPT source directory not found. Please make sure the MIDI-GPT repository is cloned next to this directory."
 }
 
-Write-Info "Installing build dependencies..."
-pip install scikit-build-core pybind11 -q
-Write-OK "Build dependencies ready"
-
-# ====================================================================
-# Step 3: Build mmm_refactored C++ Backend
-# ====================================================================
-
-Write-Step "Step 3/6: Building mmm_refactored C++ backend"
-
-$MmmCheck = python -c "import mmm_refactored" 2>&1
-if ($LASTEXITCODE -eq 0) {
-    Write-OK "mmm_refactored already installed"
-} else {
-    # -- Resolve zip source --
-    $MmmZipTmp = Join-Path $env:TEMP "mmm_refactored.zip"
-
-    if ($MmmZip) {
-        if (-not (Test-Path $MmmZip)) { Write-Fail "Local zip not found: $MmmZip" }
-        Write-Info "Using local archive: $MmmZip"
-        Copy-Item $MmmZip $MmmZipTmp -Force
-        Write-OK "Copied"
-    } else {
-        if ($MmmZipUrl -eq "PLACEHOLDER_URL") {
-            Write-Host ""
-            Write-Host "  The MMM Refactored C++ backend is not yet configured for download."
-            Write-Host ""
-            Write-Host "  Either:"
-            Write-Host "    1. Set the download URL in install.ps1 (`$MmmZipUrl variable)"
-            Write-Host "    2. Pass a local zip file:  .\install.ps1 -MmmZip C:\path\to\mmm.zip"
-            Write-Host ""
-            Write-Fail "No MMM Refactored source available."
-        }
-        Write-Info "Downloading MMM Refactored archive..."
-        Invoke-WebRequest -Uri $MmmZipUrl -OutFile $MmmZipTmp
-        Write-OK "Downloaded"
-    }
-
-    # -- Unzip --
-    Write-Info "Extracting archive..."
-    if (Test-Path $MmmBuildDir) { Remove-Item $MmmBuildDir -Recurse -Force }
-    Expand-Archive -Path $MmmZipTmp -DestinationPath $MmmBuildDir
-
-    # Handle single top-level folder
-    $Contents = Get-ChildItem $MmmBuildDir
-    if ($Contents.Count -eq 1 -and $Contents[0].PSIsContainer) {
-        $MmmSrcDir = $Contents[0].FullName
-        Write-Info "Source directory: $($Contents[0].Name)"
-    } else {
-        $MmmSrcDir = $MmmBuildDir
-    }
-
-    # Verify
-    if (-not (Test-Path (Join-Path $MmmSrcDir "CMakeLists.txt"))) {
-        Write-Fail "Extracted archive doesn't look like mmm_refactored"
-    }
-    Write-OK "Archive extracted"
-
-    # -- Build --
-    $Pybind11Dir = python -c "import pybind11; print(pybind11.get_cmake_dir())" 2>$null
-    $CmakeArgs = "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
-    if ($Pybind11Dir) {
-        $CmakeArgs += " -Dpybind11_DIR=$Pybind11Dir"
-        Write-Info "pybind11 cmake dir: $Pybind11Dir"
-    }
-
-    Write-Info "Building C++ extension (this takes 2-5 minutes)..."
-    $env:CMAKE_ARGS = $CmakeArgs
-    pip install $MmmSrcDir --no-build-isolation 2>&1 | Select-Object -Last 5
-
-    # Verify
-    $VerifyCheck = python -c "import mmm_refactored; print('mmm_refactored imported successfully')" 2>&1
+if ($MidigptInstalled) {
+    $VerifyCheck = python -c "from midigpt.inference.engine import InferenceEngine" 2>&1
     if ($LASTEXITCODE -eq 0) {
-        Write-OK "mmm_refactored built and installed"
+        Write-OK "midigpt backend installed successfully"
     } else {
-        Write-Fail "mmm_refactored build failed. Check the output above for errors."
+        Write-Fail "midigpt backend installation failed."
     }
-
-    # Cleanup
-    Remove-Item $MmmBuildDir -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item $MmmZipTmp -Force -ErrorAction SilentlyContinue
-    Write-Info "Cleaned up build files"
 }
 
-# Install remaining Python deps
-Write-Info "Installing Python dependencies..."
+Write-Info "Installing plugin dependencies..."
 pip install -e $RepoDir -q 2>$null
 if ($LASTEXITCODE -ne 0) { pip install -e $RepoDir }
-pip install symusic -q
-Write-OK "Python dependencies installed"
+Write-OK "Plugin dependencies installed"
 
 # ====================================================================
 # Step 4: REAPER Integration (Symlinks / Junctions)
@@ -334,8 +266,8 @@ $ReaperDir = Join-Path $env:APPDATA "REAPER"
 
 python (Join-Path $RepoDir "scripts\setup.py")
 
-$ScriptsLink = Join-Path $ReaperDir "Scripts\MMM"
-$EffectsLink = Join-Path $ReaperDir "Effects\MMM"
+$ScriptsLink = Join-Path $ReaperDir "Scripts\MIDI-GPT"
+$EffectsLink = Join-Path $ReaperDir "Effects\MIDI-GPT"
 
 if ((Test-Path $ScriptsLink) -and (Test-Path $EffectsLink)) {
     Write-OK "REAPER symlinks created"
@@ -412,43 +344,16 @@ for p in base.glob(f'python{ver}.dll'):
 }
 
 # ====================================================================
-# Step 6: Model Checkpoint Validation
+# Step 6: Verify Backend Installation
 # ====================================================================
 
-Write-Step "Step 6/6: Validating model setup"
+Write-Step "Step 6/6: Verifying backend installation"
 
-$ModelConfig = Join-Path $RepoDir "src\Scripts\MMM\models\config.json"
-$ModelDir = Join-Path $RepoDir "src\Scripts\MMM\models"
-
-# Auto-copy bundled model.pt
-$BundledModel = Join-Path $RepoDir "models\model.pt"
-$TargetModel = Join-Path $ModelDir "model.pt"
-if ((Test-Path $BundledModel) -and -not (Test-Path $TargetModel)) {
-    Write-Info "Copying bundled model checkpoint..."
-    Copy-Item $BundledModel $TargetModel
-    Write-OK "Model copied to $TargetModel"
-}
-
-if (Test-Path $ModelConfig) {
-    $CkptPath = python -c @"
-import json, os
-cfg = json.load(open(r'$ModelConfig'))
-ckpt = cfg['ckpt']
-if not os.path.isabs(ckpt):
-    ckpt = os.path.join(os.path.dirname(os.path.abspath(r'$ModelConfig')), ckpt)
-print(ckpt)
-"@
-    if (Test-Path $CkptPath) {
-        $CkptSize = (Get-Item $CkptPath).Length / 1MB
-        Write-OK ("Model checkpoint found: $CkptPath ({0:N0} MB)" -f $CkptSize)
-    } else {
-        Write-Warn "Model checkpoint not found at: $CkptPath"
-        Write-Host ""
-        Write-Host "  Place a model checkpoint (.pt file) at that path,"
-        Write-Host "  or update src\Scripts\MMM\models\config.json"
-    }
+$VerifyCheck = python -c "from midigpt.inference.engine import InferenceEngine" 2>&1
+if ($LASTEXITCODE -eq 0) {
+    Write-OK "Verification successful: midigpt is installed and functional"
 } else {
-    Write-Warn "Model config not found at $ModelConfig"
+    Write-Fail "Verification failed: midigpt could not be imported"
 }
 
 # ====================================================================
@@ -484,11 +389,11 @@ Write-Host "Next steps in REAPER:" -ForegroundColor White
 Write-Host ""
 Write-Host "  1. Load the ReaScript action:"
 Write-Host "     Actions > Show Action List > Load ReaScript"
-Write-Host "     Select: $ReaperDir\Scripts\MMM\REAPER_mmm_infill.py"
+Write-Host "     Select: $ReaperDir\Scripts\MIDI-GPT\REAPER_midigpt_infill.py"
 Write-Host ""
 Write-Host "  2. Add JSFX plugins:"
-Write-Host "     - Add 'MMM Global Options' to Monitor FX (View > Monitoring Effects)"
-Write-Host "     - Add 'MMM Track Options (Density-Polyphony)' to tracks you want to control"
+Write-Host "     - Add 'MIDI-GPT Global Options' to Monitor FX (View > Monitoring Effects)"
+Write-Host "     - Add 'MIDI-GPT Track Options (Yellow-Ghost)' or 'MIDI-GPT Track Options (Expressive)' to tracks"
 Write-Host ""
 Write-Host "To start the server:" -ForegroundColor White
 Write-Host "  Double-click " -NoNewline

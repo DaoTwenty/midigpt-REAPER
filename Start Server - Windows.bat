@@ -24,7 +24,7 @@ echo   Keep this window open while using MIDI-GPT in REAPER.
 echo   Press Ctrl+C to stop the server.
 echo.
 
-python src\Scripts\MMM\MMM_server.py --config src\Scripts\MMM\models\config.json
+midigpt-http --pretrained yellow --port 3456
 
 echo.
 echo Server stopped.

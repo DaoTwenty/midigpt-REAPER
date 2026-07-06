@@ -3,17 +3,11 @@
 # MIDI-GPT for REAPER - Windows Bash Installer
 #
 # Installs everything needed to run MIDI-GPT on Windows from Git Bash / MSYS:
-#   1. System dependencies (cmake, git, protobuf dev files, python, uv)
+#   1. System dependencies (git, python, uv)
 #   2. Python virtual environment + torch
-#   3. mmm_refactored C++ backend (built from source via pip)
-#   4. REAPER integration (junctions for Scripts + Effects)
-#   5. REAPER Python/ReaScript configuration
-#   6. Model checkpoint validation
-#
-# Usage:
-#   ./install-windows.sh
-#   ./install-windows.sh --skip-deps
-#   ./install-windows.sh --mmm-zip=/c/path/to/mmm_refactored.zip
+#   3. REAPER integration (junctions for Scripts + Effects)
+#   4. REAPER Python/ReaScript configuration
+#   5. Verification
 # ============================================================================
 
 set -euo pipefail
@@ -22,17 +16,14 @@ REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV_DIR="$REPO_DIR/.venv"
 UV_CMD="uv"
 PYTHON_SPEC="3.12"
-VCPKG_TRIPLET="x64-windows"
-MMM_ZIP_URL="PLACEHOLDER_URL"
-MMM_ZIP_LOCAL="./mmm_refactored.zip"
-MMM_WHEEL_LOCAL=""
-MMM_BUILD_DIR="${TEMP:-/tmp}/mmm-refactored-build"
 SKIP_DEPS=false
 SKIP_REAPER_CONFIG=false
 REAPER_DIR_OVERRIDE=""
 
-if [ -z "$MMM_ZIP_LOCAL" ] && [ -f "$REPO_DIR/mmm_refactored.zip" ]; then
-    MMM_ZIP_LOCAL="$REPO_DIR/mmm_refactored.zip"
+# Target MIDI-GPT source repo path. Auto-detected at the sibling path ../MIDI-GPT.
+MIDIGPT_SRC=""
+if [ -d "$REPO_DIR/../MIDI-GPT" ]; then
+    MIDIGPT_SRC="$(cd "$REPO_DIR/../MIDI-GPT" && pwd)"
 fi
 
 info() { printf '[INFO] %s\n' "$*"; }
@@ -47,18 +38,6 @@ step() {
     printf '%s\n' "----------------------------------------------------"
 }
 
-patch_mmm_windows_compat() {
-    local src_dir="$1"
-    local patch_script="$REPO_DIR/scripts/patch-mmm-windows-compat.sh"
-
-    [ -d "$src_dir" ] || fail "mmm_refactored source directory not found: $src_dir"
-    [ -f "$patch_script" ] || fail "Compatibility patch helper not found: $patch_script"
-
-    info "Applying Windows compatibility patch to mmm_refactored..."
-    bash "$patch_script" "$src_dir"
-    ok "Applied Windows compatibility patch"
-}
-
 show_help() {
     cat <<'EOF'
 MIDI-GPT for REAPER - Windows Bash Installer
@@ -69,23 +48,13 @@ Options:
   --skip-deps             Skip system dependency check
   --skip-reaper-config    Skip automatic REAPER Python/ReaScript configuration
   --reaper-dir=PATH       REAPER resource directory (required for portable installs)
-  --mmm-wheel=PATH        Use a local prebuilt mmm_refactored wheel
-  --mmm-zip=PATH          Use a local mmm_refactored zip instead of downloading
+  --midigpt-src=PATH      Path to the MIDI-GPT source repository (sibling folder by default)
   --help, -h              Show this help
 EOF
 }
 
 check_cmd() {
     command -v "$1" >/dev/null 2>&1
-}
-
-to_cmake_path() {
-    local input_path="$1"
-    if check_cmd cygpath; then
-        cygpath -am "$input_path" | tr '\\' '/'
-    else
-        printf '%s\n' "$input_path" | tr '\\' '/'
-    fi
 }
 
 to_posix_path() {
@@ -105,15 +74,6 @@ resolve_reaper_dir() {
     fi
 }
 
-get_default_vcpkg_root() {
-    local base="${LOCALAPPDATA:-${USERPROFILE}\\AppData\\Local}"
-    if check_cmd cygpath; then
-        cygpath -au "$base/vcpkg"
-    else
-        printf '%s\n' "$base/vcpkg" | tr '\\' '/'
-    fi
-}
-
 uv_pip_install() {
     "$UV_CMD" pip install --python "$VENV_PYTHON" "$@"
 }
@@ -122,168 +82,30 @@ venv_python() {
     "$VENV_PYTHON" "$@"
 }
 
-find_local_mmm_wheel() {
-    local candidate=""
-
-    if [ -n "$MMM_WHEEL_LOCAL" ]; then
-        [ -f "$MMM_WHEEL_LOCAL" ] || fail "Local wheel not found: $MMM_WHEEL_LOCAL"
-        printf '%s\n' "$MMM_WHEEL_LOCAL"
-        return 0
-    fi
-
-    for candidate in \
-        "$(find "$REPO_DIR/wheelhouse" -maxdepth 1 -type f -name 'mmm_refactored-*.whl' 2>/dev/null | sort | tail -1)" \
-        "$(find "$REPO_DIR" -maxdepth 1 -type f -name 'mmm_refactored-*.whl' 2>/dev/null | sort | tail -1)"
-    do
-        if [ -n "$candidate" ] && [ -f "$candidate" ]; then
-            printf '%s\n' "$candidate"
-            return 0
-        fi
-    done
-
-    return 1
-}
-
-get_venv_platlib() {
-    venv_python -c 'import sysconfig; print(sysconfig.get_path("platlib"))' 2>/dev/null || true
-}
-
-mmm_extension_present() {
-    local platlib_dir=""
-    platlib_dir="$(get_venv_platlib)"
-    [ -n "$platlib_dir" ] || return 1
-    platlib_dir="$(to_posix_path "$platlib_dir")"
-    [ -d "$platlib_dir" ] || return 1
-    find "$platlib_dir" -maxdepth 1 -type f \( -name 'mmm_refactored*.pyd' -o -name 'mmm_refactored*.so' \) | grep -q .
-}
-
-bundle_mmm_runtime_dlls() {
-    local platlib_dir=""
-    local torch_lib_dir=""
-    local protobuf_bin_dir=""
-    local copied=0
-    local dll_path=""
-
-    platlib_dir="$(get_venv_platlib)"
-    [ -n "$platlib_dir" ] || fail "Could not determine platlib/site-packages for the venv"
-    platlib_dir="$(to_posix_path "$platlib_dir")"
-    [ -d "$platlib_dir" ] || fail "platlib/site-packages directory not found: $platlib_dir"
-
-    torch_lib_dir="$platlib_dir/torch/lib"
-    if [ -d "$torch_lib_dir" ]; then
-        info "Bundling Torch runtime DLLs into site-packages..."
-        while IFS= read -r -d '' dll_path; do
-            cp -f "$dll_path" "$platlib_dir/"
-            copied=1
-        done < <(find "$torch_lib_dir" -maxdepth 1 -type f -iname '*.dll' -print0)
-    else
-        warn "Torch DLL directory not found at $torch_lib_dir"
-    fi
-
-    if find_vcpkg; then
-        protobuf_bin_dir="$VCPKG_ROOT_RESOLVED/installed/$VCPKG_TRIPLET/bin"
-    else
-        protobuf_bin_dir="$(to_posix_path "${LOCALAPPDATA:-$USERPROFILE/AppData/Local}/vcpkg/installed/$VCPKG_TRIPLET/bin")"
-    fi
-    if [ -d "$protobuf_bin_dir" ]; then
-        info "Bundling protobuf runtime DLLs into site-packages..."
-        while IFS= read -r -d '' dll_path; do
-            cp -f "$dll_path" "$platlib_dir/"
-            copied=1
-        done < <(find "$protobuf_bin_dir" -maxdepth 1 -type f -iname '*.dll' -print0)
-    else
-        warn "protobuf runtime DLL directory not found at $protobuf_bin_dir"
-    fi
-
-    if [ "$copied" -eq 1 ]; then
-        ok "Native runtime DLLs bundled next to mmm_refactored"
-    else
-        warn "No native runtime DLLs were copied; import may still rely on PATH"
-    fi
-}
-
-verify_mmm_import() {
-    venv_python -c "import mmm_refactored"
-}
-
-install_mmm_wheel() {
-    local wheel_path="$1"
-
-    [ -f "$wheel_path" ] || fail "Wheel not found: $wheel_path"
-
-    info "Installing prebuilt wheel: $wheel_path"
-    uv_pip_install "$wheel_path" || fail "Failed to install mmm_refactored wheel"
-
-    if ! verify_mmm_import >/dev/null 2>&1; then
-        warn "mmm_refactored import failed after wheel install. Diagnostics:"
-        print_mmm_import_diagnostics || true
-        fail "mmm_refactored wheel installed but the module still could not be imported"
-    fi
-
-    ok "mmm_refactored installed from wheel"
-}
-
-print_mmm_import_diagnostics() {
-    venv_python - <<'PY'
-import sys
-import sysconfig
-import os
-import traceback
-from pathlib import Path
-
-print("[DIAG] Python executable:", sys.executable)
-platlib = Path(sysconfig.get_path("platlib"))
-print("[DIAG] platlib:", platlib)
-if platlib.is_dir():
-    for path in sorted(platlib.glob("mmm_refactored*")):
-        print("[DIAG] found:", path.name)
-
-torch_lib = platlib / "torch" / "lib"
-print("[DIAG] torch lib dir:", torch_lib, "exists=" + str(torch_lib.is_dir()))
-if torch_lib.is_dir():
-    torch_dlls = sorted(torch_lib.glob("*.dll"))
-    print("[DIAG] torch dll count:", len(torch_dlls))
-    for path in torch_dlls[:10]:
-        print("[DIAG] torch dll:", path.name)
-
-vcpkg_root = os.environ.get("VCPKG_ROOT")
-local_appdata = os.environ.get("LOCALAPPDATA", "")
-protobuf_candidates = []
-if vcpkg_root:
-    protobuf_candidates.append(Path(vcpkg_root) / "installed" / "x64-windows" / "bin")
-if local_appdata:
-    protobuf_candidates.append(Path(local_appdata) / "vcpkg" / "installed" / "x64-windows" / "bin")
-seen = set()
-for candidate in protobuf_candidates:
-    candidate = candidate.resolve() if candidate.exists() else candidate
-    if str(candidate) in seen:
-        continue
-    seen.add(str(candidate))
-    print("[DIAG] protobuf bin dir:", candidate, "exists=" + str(candidate.is_dir()))
-    if candidate.is_dir():
-        dlls = sorted(candidate.glob("*.dll"))
-        print("[DIAG] protobuf dll count:", len(dlls))
-        for path in dlls[:10]:
-            print("[DIAG] protobuf dll:", path.name)
-
-try:
-    import mmm_refactored  # noqa: F401
-    print("[DIAG] import mmm_refactored: OK")
-except Exception:
-    print("[DIAG] import mmm_refactored failed:")
-    traceback.print_exc()
-    raise
-PY
-}
-
 ensure_windows_shell() {
     case "$(uname -s)" in
-        MINGW*|MSYS*|CYGWIN*) ;;
-        *)
-            fail "This installer is for Windows bash environments only. Use ./install.sh on Linux/macOS."
-            ;;
+        MINGW*|MSYS*) return 0 ;;
+        *) fail "This installer script must be run under Git Bash or MSYS on Windows. On macOS/Linux, use ./install.sh." ;;
     esac
 }
+
+# ── Args ────────────────────────────────────────────────────────
+
+for arg in "$@"; do
+    case "$arg" in
+        --skip-deps) SKIP_DEPS=true ;;
+        --skip-reaper-config) SKIP_REAPER_CONFIG=true ;;
+        --reaper-dir=*) REAPER_DIR_OVERRIDE="${arg#*=}" ;;
+        --midigpt-src=*) MIDIGPT_SRC="${arg#*=}" ;;
+        --help|-h)
+            show_help
+            exit 0
+            ;;
+        *)
+            fail "Unknown option: $arg"
+            ;;
+    esac
+done
 
 to_windows_path() {
     local input_path="$1"
@@ -663,130 +485,42 @@ else
     info "If you use a portable REAPER install, re-run with --reaper-dir=/path/to/REAPER-resource-dir"
 fi
 
-step "Step 3/6: Building mmm_refactored C++ backend"
+step "Step 3/6: Installing MIDI-GPT backend"
 
-if mmm_extension_present; then
-    info "Existing mmm_refactored extension found; refreshing bundled runtime DLLs..."
-    bundle_mmm_runtime_dlls
+# Try to find MIDI-GPT in sibling directory
+MIDIGPT_SIBLING="$REPO_DIR/../MIDI-GPT"
+MIDIGPT_SRC_WIN=""
+
+if [ -n "$MIDIGPT_REFACTOR_SRC" ] && [ -d "$MIDIGPT_REFACTOR_SRC" ]; then
+    MIDIGPT_SRC_WIN="$MIDIGPT_REFACTOR_SRC"
+elif [ -d "$MIDIGPT_SIBLING" ]; then
+    MIDIGPT_SRC_WIN="$MIDIGPT_SIBLING"
 fi
 
-if verify_mmm_import >/dev/null 2>&1; then
-    ok "mmm_refactored already installed"
-elif mmm_extension_present; then
-    warn "mmm_refactored is installed, but import still fails after refreshing runtime DLLs."
-    print_mmm_import_diagnostics || true
-    fail "mmm_refactored is already built but cannot be imported; refusing to rebuild blindly"
-elif MMM_WHEEL_PATH="$(find_local_mmm_wheel 2>/dev/null)"; then
-    info "Local mmm_refactored wheel detected; using it instead of building from source."
-    install_mmm_wheel "$MMM_WHEEL_PATH"
+if [ -n "$MIDIGPT_SRC_WIN" ]; then
+    info "Installing midigpt[http,inference] from $MIDIGPT_SRC_WIN ..."
+    # Install with extras using editable mode via uv
+    "$UV_CMD" pip install --python "$VENV_PYTHON" -e "${MIDIGPT_SRC_WIN}[http,inference]"
+    
+    if venv_python -c "from midigpt.inference.engine import InferenceEngine" >/dev/null 2>&1; then
+        ok "MIDI-GPT backend installed successfully"
+    else
+        fail "MIDI-GPT backend installation failed."
+    fi
 else
-    MMM_ZIP_TMP="${TEMP:-/tmp}/mmm_refactored.zip"
-
-    if [ -n "$MMM_ZIP_LOCAL" ]; then
-        [ -f "$MMM_ZIP_LOCAL" ] || fail "Local zip not found: $MMM_ZIP_LOCAL"
-        info "Using local archive: $MMM_ZIP_LOCAL"
-        cp "$MMM_ZIP_LOCAL" "$MMM_ZIP_TMP"
-        ok "Copied archive"
-    else
-        if [ "$MMM_ZIP_URL" = "PLACEHOLDER_URL" ]; then
-            echo "The MMM Refactored C++ backend is not yet configured for download."
-            echo "Either set MMM_ZIP_URL in install-windows.sh or pass:"
-            echo "  ./install-windows.sh --mmm-zip=/path/to/mmm_refactored.zip"
-            fail "No MMM Refactored source available"
-        fi
-
-        info "Downloading MMM Refactored archive..."
-        if check_cmd curl; then
-            curl -L -o "$MMM_ZIP_TMP" "$MMM_ZIP_URL"
-        elif check_cmd wget; then
-            wget -O "$MMM_ZIP_TMP" "$MMM_ZIP_URL"
-        else
-            fail "Neither curl nor wget found"
-        fi
-        ok "Downloaded archive"
-    fi
-
-    info "Extracting archive..."
-    rm -rf "$MMM_BUILD_DIR"
-    mkdir -p "$MMM_BUILD_DIR"
-    unzip -q "$MMM_ZIP_TMP" -d "$MMM_BUILD_DIR"
-
-    CONTENTS=("$MMM_BUILD_DIR"/*)
-    if [ "${#CONTENTS[@]}" -eq 1 ] && [ -d "${CONTENTS[0]}" ]; then
-        MMM_SRC_DIR="${CONTENTS[0]}"
-        info "Source directory: $(basename "$MMM_SRC_DIR")"
-    else
-        MMM_SRC_DIR="$MMM_BUILD_DIR"
-    fi
-
-    [ -f "$MMM_SRC_DIR/CMakeLists.txt" ] || fail "Extracted archive doesn't look like mmm_refactored"
-    ok "Archive extracted"
-    patch_mmm_windows_compat "$MMM_SRC_DIR"
-
-    PYBIND11_CMAKE_DIR="$(venv_python -c 'import pybind11; print(pybind11.get_cmake_dir())' 2>/dev/null || true)"
-    PYTHON_BASE_PREFIX="$(venv_python -c 'import sys; print(sys.base_prefix)' 2>/dev/null || true)"
-    PYTHON_BASE_EXEC_PREFIX="$(venv_python -c 'import sys; print(sys.base_exec_prefix)' 2>/dev/null || true)"
-    PYTHON_INCLUDE_DIR="$(venv_python -c 'import pathlib, sys; print(pathlib.Path(sys.base_prefix) / "include")' 2>/dev/null || true)"
-    PYTHON_LIBRARY_PATH="$(venv_python -c 'import pathlib, sys; ver = f"{sys.version_info.major}{sys.version_info.minor}"; print(pathlib.Path(sys.base_prefix) / "libs" / f"python{ver}.lib")' 2>/dev/null || true)"
-
-    CMAKE_EXTRA_ARGS="-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
-    if [ -n "$PYBIND11_CMAKE_DIR" ]; then
-        CMAKE_EXTRA_ARGS="$CMAKE_EXTRA_ARGS -Dpybind11_DIR=$(to_cmake_path "$PYBIND11_CMAKE_DIR")"
-        info "pybind11 cmake dir: $PYBIND11_CMAKE_DIR"
-    fi
-
-    if [ -n "$PYTHON_BASE_PREFIX" ]; then
-        CMAKE_EXTRA_ARGS="$CMAKE_EXTRA_ARGS -DPython_ROOT_DIR=$(to_cmake_path "$PYTHON_BASE_PREFIX") -DPython3_ROOT_DIR=$(to_cmake_path "$PYTHON_BASE_PREFIX")"
-    fi
-    if [ -n "$PYTHON_BASE_EXEC_PREFIX" ]; then
-        CMAKE_EXTRA_ARGS="$CMAKE_EXTRA_ARGS -DPython_EXECUTABLE=$(to_cmake_path "$VENV_PYTHON") -DPython3_EXECUTABLE=$(to_cmake_path "$VENV_PYTHON")"
-    fi
-    if [ -n "$PYTHON_INCLUDE_DIR" ]; then
-        CMAKE_EXTRA_ARGS="$CMAKE_EXTRA_ARGS -DPython_INCLUDE_DIR=$(to_cmake_path "$PYTHON_INCLUDE_DIR") -DPython3_INCLUDE_DIR=$(to_cmake_path "$PYTHON_INCLUDE_DIR")"
-    fi
-    if [ -f "$PYTHON_LIBRARY_PATH" ]; then
-        CMAKE_EXTRA_ARGS="$CMAKE_EXTRA_ARGS -DPython_LIBRARY=$(to_cmake_path "$PYTHON_LIBRARY_PATH") -DPython3_LIBRARY=$(to_cmake_path "$PYTHON_LIBRARY_PATH")"
-    fi
-
-    if find_protobuf; then
-        CMAKE_EXTRA_ARGS="$CMAKE_EXTRA_ARGS -DProtobuf_PROTOC_EXECUTABLE=$PROTOC_PATH -DProtobuf_INCLUDE_DIR=$PROTOBUF_INCLUDE_DIR -DProtobuf_LIBRARY=$PROTOBUF_LIBRARY -DProtobuf_LIBRARIES=$PROTOBUF_LIBRARY"
-        if [ "$PROTOBUF_SOURCE" = "vcpkg" ] && find_vcpkg; then
-            CMAKE_EXTRA_ARGS="$CMAKE_EXTRA_ARGS -DCMAKE_TOOLCHAIN_FILE=$VCPKG_TOOLCHAIN_FILE -DVCPKG_TARGET_TRIPLET=$VCPKG_TRIPLET -DCMAKE_PREFIX_PATH=$PROTOBUF_ROOT"
-            info "protobuf via vcpkg: $PROTOBUF_ROOT"
-            info "vcpkg toolchain: $VCPKG_TOOLCHAIN_FILE"
-        else
-            CMAKE_EXTRA_ARGS="$CMAKE_EXTRA_ARGS -DCMAKE_PREFIX_PATH=$PROTOBUF_ROOT"
-            info "protobuf root: $PROTOBUF_ROOT"
-        fi
-        info "protobuf library: $PROTOBUF_LIBRARY"
-    fi
-
-    info "Building C++ extension (this takes 2-5 minutes)..."
-    CMAKE_ARGS="$CMAKE_EXTRA_ARGS" "$UV_CMD" pip install --python "$VENV_PYTHON" "$MMM_SRC_DIR" --no-build-isolation
-
-    bundle_mmm_runtime_dlls
-    if ! verify_mmm_import >/dev/null 2>&1; then
-        warn "mmm_refactored import failed after build. Diagnostics:"
-        print_mmm_import_diagnostics || true
-        fail "mmm_refactored build completed but the module still could not be imported"
-    fi
-    ok "mmm_refactored built and installed"
-
-    rm -rf "$MMM_BUILD_DIR" "$MMM_ZIP_TMP"
-    info "Cleaned up build files"
+    fail "MIDI-GPT source directory not found. Please make sure the MIDI-GPT repository is cloned next to this directory."
 fi
 
-info "Installing Python dependencies..."
+info "Installing plugin dependencies..."
 uv_pip_install -e "$REPO_DIR" >/dev/null 2>&1 || uv_pip_install -e "$REPO_DIR"
-uv_pip_install symusic >/dev/null
-ok "Python dependencies installed"
+ok "Plugin dependencies installed"
 
 step "Step 4/6: Setting up REAPER integration"
 
-SCRIPTS_SRC="$REPO_DIR/src/Scripts/MMM"
-EFFECTS_SRC="$REPO_DIR/src/Effects/MMM"
-SCRIPTS_DST="$REAPER_DIR/Scripts/MMM"
-EFFECTS_DST="$REAPER_DIR/Effects/MMM"
+SCRIPTS_SRC="$REPO_DIR/src/Scripts/MIDI-GPT"
+EFFECTS_SRC="$REPO_DIR/src/Effects/MIDI-GPT"
+SCRIPTS_DST="$REAPER_DIR/Scripts/MIDI-GPT"
+EFFECTS_DST="$REAPER_DIR/Effects/MIDI-GPT"
 
 if [ -d "$REAPER_DIR" ]; then
     make_reaper_junction "$SCRIPTS_SRC" "$SCRIPTS_DST"
@@ -802,9 +536,6 @@ else
     step "Step 5/6: Configuring REAPER (reaper.ini)"
 
     REAPER_INI="$REAPER_DIR/reaper.ini"
-    # REAPER only needs a valid Python runtime DLL for ReaScript.
-    # The server uses the venv's packages, but the DLL should come from the
-    # base interpreter behind the uv-managed venv, not from the venv prefix.
     PYTHON_DLL_PATH="$(venv_python -c 'import pathlib, sys; base = pathlib.Path(sys.base_exec_prefix); dll = next(base.glob(f"python{sys.version_info.major}{sys.version_info.minor}.dll"), None); print(dll or "")' 2>/dev/null)"
 
     if [ -f "$REAPER_INI" ]; then
@@ -835,29 +566,12 @@ else
     fi
 fi
 
-step "Step 6/6: Validating model setup"
+step "Step 6/6: Verifying backend installation"
 
-MODEL_CONFIG="$REPO_DIR/src/Scripts/MMM/models/config.json"
-MODEL_DIR="$REPO_DIR/src/Scripts/MMM/models"
-TARGET_MODEL="$MODEL_DIR/model.pt"
-MODEL_CONFIG_WIN="$(to_windows_path "$MODEL_CONFIG")"
-
-if [ -f "$REPO_DIR/models/model.pt" ] && [ ! -f "$TARGET_MODEL" ]; then
-    info "Copying bundled model checkpoint..."
-    cp "$REPO_DIR/models/model.pt" "$TARGET_MODEL"
-    ok "Model copied to $TARGET_MODEL"
-fi
-
-if [ -f "$MODEL_CONFIG" ]; then
-    CKPT_PATH="$(venv_python -c "import json, os; cfg_path = r'$MODEL_CONFIG_WIN'; cfg = json.load(open(cfg_path)); ckpt = cfg['ckpt']; print(ckpt if os.path.isabs(ckpt) else os.path.join(os.path.dirname(os.path.abspath(cfg_path)), ckpt))")"
-    if [ -f "$CKPT_PATH" ]; then
-        ok "Model checkpoint found: $CKPT_PATH"
-    else
-        warn "Model checkpoint not found at: $CKPT_PATH"
-        echo "Place a model checkpoint (.pt file) there or update src/Scripts/MMM/models/config.json"
-    fi
+if venv_python -c "from midigpt.inference.engine import InferenceEngine" >/dev/null 2>&1; then
+    ok "Verification successful: midigpt is installed and functional"
 else
-    warn "Model config not found at $MODEL_CONFIG"
+    fail "Verification failed: midigpt could not be imported"
 fi
 
 create_desktop_launcher
@@ -869,11 +583,12 @@ echo "===================================================="
 echo ""
 echo "Next steps in REAPER:"
 echo "  1. Actions > Show Action List > Load ReaScript"
-echo "  2. Select: $REAPER_DIR/Scripts/MMM/REAPER_mmm_infill.py"
-echo "  3. In the FX browser, search for 'MMM' or 'JS: MMM'"
-echo "  4. Add 'JS: MMM Global Options' to Monitor FX"
-echo "  5. Add 'JS: MMM Track Options (MIDI-GPT)' to the tracks you want to control"
+echo "  2. Select: $REAPER_DIR/Scripts/MIDI-GPT/REAPER_midigpt_infill.py"
+echo "  3. In the FX browser, search for 'MIDI-GPT'"
+echo "  4. Add 'MIDI-GPT Global Options' to Monitor FX"
+echo "  5. Add 'MIDI-GPT Track Options (Yellow-Ghost)' or 'MIDI-GPT Track Options (Expressive)' to tracks"
 echo ""
 echo "To start the server:"
 echo "  Double-click Start MIDI-GPT Server.cmd on your Desktop"
 echo "  or run Start Server - Windows.bat from the repo root"
+

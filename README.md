@@ -38,9 +38,9 @@ Built on [MIDI-GPT](https://github.com/DaoTwenty/MIDI-GPT) (GPT-2 Transformer fo
 
 MIDI-GPT for REAPER has three components:
 
-1. **Inference Server** (`MMM_server.py`) — Loads the model checkpoint and listens for generation jobs on `127.0.0.1:3456`.
-2. **REAPER Script** (`REAPER_mmm_infill.py`) — Reads your REAPER session (MIDI, instruments, control values), sends a job to the server, and writes the result back into your project.
-3. **JSFX Controls** — Lightweight REAPER effects that give you knobs for temperature, density, polyphony, note duration, and other generation parameters.
+1. **Inference Server** (`midigpt-http`) — Starts a stateless FastAPI server listening for generation requests on `127.0.0.1:3456`.
+2. **REAPER Script** (`REAPER_midigpt_infill.py`) — Reads your REAPER session (MIDI, instruments, control values), sends a generation payload to the server, and writes the result back into your project.
+3. **JSFX Controls** — Lightweight REAPER effects that give you knobs for temperature, density, polyphony, key signature, pitch range, and other generation parameters.
 
 The model sees your existing MIDI as context and generates new notes for the bars you select, producing results that fit musically with the surrounding material.
 
@@ -309,10 +309,10 @@ Before generating anything, the inference server must be running.
 ```bash
 cd /path/to/MIDI-GPT-for-REAPER
 source .venv/bin/activate
-python src/Scripts/MMM/MMM_server.py --config src/Scripts/MMM/models/config.json
+midigpt-http --pretrained yellow
 ```
 
-The server will print a banner and listen on `127.0.0.1:3456`. Keep this window open while using MIDI-GPT in REAPER.
+The server will listen on `127.0.0.1:3456`. Keep this window open while using MIDI-GPT in REAPER.
 
 ### 2. Set Up Your REAPER Session
 
@@ -784,28 +784,25 @@ MIDI-GPT-for-REAPER/
   Install - Linux.sh               # Linux double-click installer
   Install - Windows.bat            # Windows double-click installer
   install.sh                       # Core installer (macOS/Linux)
+  install-windows.sh               # Windows install bash helper
   install.ps1                      # Core installer (Windows/PowerShell)
   Start Server - Mac.command       # macOS server launcher
   Start Server - Windows.bat       # Windows server launcher
-  start_mmm_server.sh              # Server launcher (macOS/Linux terminal)
+  start_midigpt_server.sh          # Server launcher (macOS/Linux terminal)
   build_release.sh                 # Release package builder
   src/
-    Effects/MMM/
-      MMM Global Options.js                    # Monitor FX — global generation controls
-      MMM Track Options (Density-Polyphony).js # Per-track FX — density, polyphony, duration
-    Scripts/MMM/
-      MMM_server.py                # Inference server (XMLRPC on port 3456)
-      REAPER_mmm_infill.py         # REAPER client script
+    Effects/MIDI-GPT/
+      MIDI-GPT Global Options.js               # Monitor FX — global generation controls
+      MIDI-GPT Track Options (Yellow-Ghost).js # Per-track FX — controls for Yellow/Ghost models
+      MIDI-GPT Track Options (Expressive).js   # Per-track FX — controls for Expressive models
+    Scripts/MIDI-GPT/
+      REAPER_midigpt_infill.py     # REAPER client script
       midi_extraction.py           # MIDI extraction from REAPER sessions
-      models/
-        config.json                # Model config (checkpoint path, AC schema)
-        model.pt                   # Model checkpoint (not in git)
   scripts/
     setup.py                       # Creates REAPER symlinks
   tests/
     conftest.py                    # Test stubs for REAPER/C++ deps
     test_midi_extraction.py        # Data structure and extraction tests
-    test_server_logic.py           # Server logic and API compliance tests
 ```
 
 ---

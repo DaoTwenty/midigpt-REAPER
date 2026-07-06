@@ -32,22 +32,9 @@ if "reaper_python" not in sys.modules:
 
 
 # ---------------------------------------------------------------------------
-# Stub: mmm_refactored
-# ---------------------------------------------------------------------------
-
-if "mmm_refactored" not in sys.modules:
-    _mmm = types.ModuleType("mmm_refactored")
-    _mmm.ElVelocityDurationPolyphonyYellowEncoder = type(
-        "ElVelocityDurationPolyphonyYellowEncoder", (), {}
-    )
-    _mmm.sample_multi_step = lambda *a, **k: "{}"
-    sys.modules["mmm_refactored"] = _mmm
-
-
-# ---------------------------------------------------------------------------
 # Add source directories to sys.path
 # ---------------------------------------------------------------------------
 
-_src_mmm = os.path.join(os.path.dirname(__file__), "..", "src", "Scripts", "MMM")
-if _src_mmm not in sys.path:
-    sys.path.insert(0, _src_mmm)
+_src_midigpt = os.path.join(os.path.dirname(__file__), "..", "src", "Scripts", "MIDI-GPT")
+if _src_midigpt not in sys.path:
+    sys.path.insert(0, _src_midigpt)

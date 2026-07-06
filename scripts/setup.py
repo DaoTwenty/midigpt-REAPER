@@ -17,13 +17,13 @@ def main():
     print(f"Setting up REAPER integration at: {reaper_path}")
     
     project_root = Path.cwd()
-    scripts_src = project_root / "src" / "Scripts" / "MMM"
-    effects_src = project_root / "src" / "Effects" / "MMM"
+    scripts_src = project_root / "src" / "Scripts" / "MIDI-GPT"
+    effects_src = project_root / "src" / "Effects" / "MIDI-GPT"
 
     print(f"Linking:\n    - {scripts_src}\n    - {effects_src}")
     
-    scripts_dst = reaper_path / "Scripts" / "MMM"
-    effects_dst = reaper_path / "Effects" / "MMM"
+    scripts_dst = reaper_path / "Scripts" / "MIDI-GPT"
+    effects_dst = reaper_path / "Effects" / "MIDI-GPT"
     
     if scripts_src.exists():
         if scripts_dst.exists():

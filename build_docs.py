@@ -10,7 +10,7 @@ import pathlib
 import re
 
 ROOT = pathlib.Path(__file__).resolve().parent
-HTML_PATH = ROOT / "docs.html"
+HTML_PATH = ROOT / "docs" / "index.html"
 README_PATH = ROOT / "README.md"
 
 PLACEHOLDER = "{{README_CONTENT}}"
@@ -42,7 +42,7 @@ def build():
         )
 
     HTML_PATH.write_text(html, encoding="utf-8")
-    print(f"docs.html updated ({len(readme)} chars embedded from README.md)")
+    print(f"docs/index.html updated ({len(readme)} chars embedded from README.md)")
 
 
 if __name__ == "__main__":

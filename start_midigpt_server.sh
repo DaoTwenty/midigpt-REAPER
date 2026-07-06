@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 # ============================================================================
-# MIDI-GPT Server Launcher (macOS / Linux)
+# MIDI-GPT HTTP Server Launcher (macOS / Linux)
 #
-# Double-click this file or run from terminal to start the inference server.
-# The server must be running before using MIDI-GPT in REAPER.
+# Starts the stateless FastAPI HTTP server for REAPER generation.
+# By default, runs the 'yellow' model on port 3456.
+#
+# Usage:
+#   ./start_midigpt_server.sh                          # Runs yellow
+#   ./start_midigpt_server.sh --pretrained ghost       # Runs ghost
+#   ./start_midigpt_server.sh --ckpt path/to/model.pt  # Runs local checkpoint
 # ============================================================================
 
 # cd to the directory containing this script
@@ -26,14 +31,19 @@ echo "  ╔═══════════════════════
 echo "  ║      MIDI-GPT Server Starting...     ║"
 echo "  ╚══════════════════════════════════════╝"
 echo ""
-echo "  The server will listen on 127.0.0.1:3456"
 echo "  Keep this window open while using MIDI-GPT in REAPER."
 echo "  Press Ctrl+C to stop the server."
 echo ""
 
-python src/Scripts/MMM/MMM_server.py --config src/Scripts/MMM/models/config.json
+# Default parameters: run 'yellow' model on port 3456 if no arguments are provided.
+# If arguments are passed (e.g. --pretrained ghost or --ckpt ...), forward them.
+if [ $# -eq 0 ]; then
+    midigpt-http --pretrained yellow --port 3456
+else
+    midigpt-http --port 3456 "$@"
+fi
 
-# If the server exits, keep the window open so the user can see errors
+# Keep window open on error
 echo ""
 echo "Server stopped."
 read -rp "Press Enter to close..."
