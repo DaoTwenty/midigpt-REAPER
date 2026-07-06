@@ -19,7 +19,7 @@
 param(
     [switch]$SkipDeps,
     [switch]$SkipReaperConfig,
-    [string]$MmmZip = "",
+    [string]$MidigptSrc = "",
     [switch]$Help
 )
 
@@ -29,8 +29,6 @@ $ErrorActionPreference = "Stop"
 $RepoDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $VenvDir = Join-Path $RepoDir ".venv"
 $PythonMinVersion = "3.10"
-$MmmZipUrl = "PLACEHOLDER_URL"
-$MmmBuildDir = Join-Path $env:TEMP "mmm-refactored-build"
 
 # ── Helpers ─────────────────────────────────────────────────────
 
@@ -59,7 +57,7 @@ if ($Help) {
     Write-Host "Options:"
     Write-Host "  -SkipDeps            Skip system dependency check"
     Write-Host "  -SkipReaperConfig    Skip automatic REAPER Python/ReaScript configuration"
-    Write-Host "  -MmmZip PATH         Use a local mmm_refactored zip instead of downloading"
+    Write-Host "  -MidigptSrc PATH     Path to MIDI-GPT source repo (sibling folder by default)"
     Write-Host "  -Help                Show this help"
     exit 0
 }
@@ -72,12 +70,6 @@ Write-Host "  ║     MIDI-GPT for REAPER Installer    ║" -ForegroundColor Whi
 Write-Host "  ╚══════════════════════════════════════╝" -ForegroundColor White
 Write-Host ""
 Write-Info "Platform: Windows"
-
-# Auto-detect bundled mmm_refactored.zip
-$BundledZip = Join-Path $RepoDir "mmm_refactored.zip"
-if (-not $MmmZip -and (Test-Path $BundledZip)) {
-    $MmmZip = $BundledZip
-}
 
 # ====================================================================
 # Step 1: System Dependencies
@@ -110,14 +102,6 @@ if (-not $SkipDeps) {
         Write-OK "Python $PyVer ($PythonCmd)"
     }
 
-    # -- cmake --
-    if (Test-Command "cmake") {
-        Write-OK "cmake found"
-    } else {
-        $Missing += "cmake"
-        Write-Warn "cmake not found"
-    }
-
     # -- git --
     if (Test-Command "git") {
         Write-OK "git found"
@@ -144,10 +128,6 @@ if (-not $SkipDeps) {
                     "python>=3.10" {
                         if ($Installer -eq "winget") { winget install Python.Python.3.14 --accept-package-agreements --accept-source-agreements }
                         else { choco install python314 -y }
-                    }
-                    "cmake" {
-                        if ($Installer -eq "winget") { winget install Kitware.CMake --accept-package-agreements --accept-source-agreements }
-                        else { choco install cmake -y }
                     }
                     "git" {
                         if ($Installer -eq "winget") { winget install Git.Git --accept-package-agreements --accept-source-agreements }
@@ -228,27 +208,35 @@ if (Test-Path $VenvDir) {
 Write-Step "Step 3/6: Installing MIDI-GPT backend"
 
 $MidigptSibling = Join-Path (Split-Path $RepoDir -Parent) "MIDI-GPT"
-$MidigptInstalled = $false
 
-if ($MidigptRefactorSrc -and (Test-Path $MidigptRefactorSrc)) {
-    Write-Info "Installing midigpt[http,inference] from $MidigptRefactorSrc ..."
-    pip install -e "${MidigptRefactorSrc}[http,inference]" 2>&1
-    $MidigptInstalled = $true
+if ($MidigptSrc -and (Test-Path $MidigptSrc)) {
+    Write-Info "Installing midigpt[http,inference] from source: $MidigptSrc ..."
+    pip install -e "${MidigptSrc}[http,inference]" 2>&1
 } elseif (Test-Path $MidigptSibling) {
-    Write-Info "Installing midigpt[http,inference] from sibling folder $MidigptSibling ..."
+    Write-Info "Installing midigpt[http,inference] from sibling repo: $MidigptSibling ..."
     pip install -e "${MidigptSibling}[http,inference]" 2>&1
-    $MidigptInstalled = $true
 } else {
-    Write-Fail "MIDI-GPT source directory not found. Please make sure the MIDI-GPT repository is cloned next to this directory."
+    Write-Info "Installing midigpt[http,inference] from PyPI ..."
+    $PyPIResult = pip install "midigpt[http,inference]" 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn "PyPI install failed — falling back to cloning MIDI-GPT from GitHub ..."
+        $MidigptClone = Join-Path (Split-Path $RepoDir -Parent) "MIDI-GPT"
+        if (-not (Test-Path (Join-Path $MidigptClone ".git"))) {
+            git clone https://github.com/Metacreation-Lab/MIDI-GPT.git $MidigptClone
+            if ($LASTEXITCODE -ne 0) { Write-Fail "Failed to clone MIDI-GPT. Check your internet connection." }
+        } else {
+            Write-Info "Existing MIDI-GPT clone found at $MidigptClone"
+        }
+        pip install -e "${MidigptClone}[http,inference]" 2>&1
+        if ($LASTEXITCODE -ne 0) { Write-Fail "Source install from cloned MIDI-GPT also failed." }
+    }
 }
 
-if ($MidigptInstalled) {
-    $VerifyCheck = python -c "from midigpt.inference.engine import InferenceEngine" 2>&1
-    if ($LASTEXITCODE -eq 0) {
-        Write-OK "midigpt backend installed successfully"
-    } else {
-        Write-Fail "midigpt backend installation failed."
-    }
+$VerifyCheck = python -c "from midigpt.inference.engine import InferenceEngine" 2>&1
+if ($LASTEXITCODE -eq 0) {
+    Write-OK "midigpt backend installed successfully"
+} else {
+    Write-Fail "midigpt backend installation failed."
 }
 
 Write-Info "Installing plugin dependencies..."
@@ -264,15 +252,21 @@ Write-Step "Step 4/6: Setting up REAPER integration"
 
 $ReaperDir = Join-Path $env:APPDATA "REAPER"
 
-python (Join-Path $RepoDir "scripts\setup.py")
+function New-ReaperJunction {
+    param([string]$Src, [string]$Dst)
+    if (-not (Test-Path $Src)) { return }
+    $DstParent = Split-Path $Dst -Parent
+    if (-not (Test-Path $DstParent)) { New-Item -ItemType Directory -Path $DstParent -Force | Out-Null }
+    if (Test-Path $Dst) { cmd /c "rmdir `"$Dst`"" 2>$null; Remove-Item $Dst -Recurse -Force -ErrorAction SilentlyContinue }
+    cmd /c "mklink /J `"$Dst`" `"$Src`"" | Out-Null
+}
 
-$ScriptsLink = Join-Path $ReaperDir "Scripts\MIDI-GPT"
-$EffectsLink = Join-Path $ReaperDir "Effects\MIDI-GPT"
-
-if ((Test-Path $ScriptsLink) -and (Test-Path $EffectsLink)) {
-    Write-OK "REAPER symlinks created"
+if (Test-Path $ReaperDir) {
+    New-ReaperJunction (Join-Path $RepoDir "src\Scripts\MIDI-GPT") (Join-Path $ReaperDir "Scripts\MIDI-GPT")
+    New-ReaperJunction (Join-Path $RepoDir "src\Effects\MIDI-GPT") (Join-Path $ReaperDir "Effects\MIDI-GPT")
+    Write-OK "REAPER junctions created"
 } else {
-    Write-Warn "REAPER symlinks could not be verified (REAPER may not be installed yet)"
+    Write-Warn "REAPER config directory not found — REAPER may not be installed yet"
 }
 
 # ====================================================================

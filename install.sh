@@ -258,16 +258,32 @@ fi
 step "Step 3/6: Installing MIDI-GPT backend"
 
 if [ -n "$MIDIGPT_SRC" ] && [ -d "$MIDIGPT_SRC" ]; then
-    info "Installing midigpt[http,inference] from $MIDIGPT_SRC ..."
+    info "Installing midigpt[http,inference] from source: $MIDIGPT_SRC ..."
     pip install -e "${MIDIGPT_SRC}[http,inference]" 2>&1 | tail -5
-    
-    if python -c "from midigpt.inference.engine import InferenceEngine" 2>/dev/null; then
-        ok "midigpt backend installed successfully"
-    else
-        fail "midigpt backend installation failed."
-    fi
+elif [ -d "$REPO_DIR/../MIDI-GPT" ]; then
+    MIDIGPT_SIBLING="$(cd "$REPO_DIR/../MIDI-GPT" && pwd)"
+    info "Installing midigpt[http,inference] from sibling repo: $MIDIGPT_SIBLING ..."
+    pip install -e "${MIDIGPT_SIBLING}[http,inference]" 2>&1 | tail -5
 else
-    fail "MIDI-GPT source directory not found at $MIDIGPT_SRC. Please make sure the MIDI-GPT repository is cloned next to this directory or specify --midigpt-src=PATH."
+    info "Installing midigpt[http,inference] from PyPI ..."
+    if ! pip install "midigpt[http,inference]" 2>&1 | tail -5; then
+        warn "PyPI install failed — falling back to cloning MIDI-GPT from GitHub ..."
+        MIDIGPT_CLONE="$(cd "$REPO_DIR/.." && pwd)/MIDI-GPT"
+        if [ ! -d "$MIDIGPT_CLONE/.git" ]; then
+            git clone https://github.com/Metacreation-Lab/MIDI-GPT.git "$MIDIGPT_CLONE" \
+                || fail "Failed to clone MIDI-GPT. Check your internet connection and try again."
+        else
+            info "Existing MIDI-GPT clone found at $MIDIGPT_CLONE"
+        fi
+        pip install -e "${MIDIGPT_CLONE}[http,inference]" 2>&1 | tail -5 \
+            || fail "Source install from cloned MIDI-GPT also failed."
+    fi
+fi
+
+if python -c "from midigpt.inference.engine import InferenceEngine" 2>/dev/null; then
+    ok "midigpt backend installed successfully"
+else
+    fail "midigpt backend installation failed."
 fi
 
 info "Installing plugin dependencies..."
@@ -280,9 +296,6 @@ ok "Plugin dependencies installed"
 
 step "Step 4/6: Setting up REAPER integration"
 
-python "$REPO_DIR/scripts/setup.py"
-
-# Verify symlinks
 if [ "$PLATFORM" = "macos" ]; then
     REAPER_DIR="$HOME/Library/Application Support/REAPER"
 elif [ "$PLATFORM" = "windows" ]; then
@@ -291,10 +304,21 @@ else
     REAPER_DIR="$HOME/.config/REAPER"
 fi
 
-if [ -L "$REAPER_DIR/Scripts/MIDI-GPT" ] && [ -L "$REAPER_DIR/Effects/MIDI-GPT" ]; then
+if [ -d "$REAPER_DIR" ]; then
+    for pair in \
+        "$REPO_DIR/src/Scripts/MIDI-GPT:$REAPER_DIR/Scripts/MIDI-GPT" \
+        "$REPO_DIR/src/Effects/MIDI-GPT:$REAPER_DIR/Effects/MIDI-GPT"
+    do
+        src="${pair%%:*}"
+        dst="${pair##*:}"
+        [ -d "$src" ] || continue
+        mkdir -p "$(dirname "$dst")"
+        [ -e "$dst" ] || [ -L "$dst" ] && rm -rf "$dst"
+        ln -sf "$src" "$dst"
+    done
     ok "REAPER symlinks created"
 else
-    warn "REAPER symlinks could not be verified (REAPER may not be installed yet)"
+    warn "REAPER config directory not found — REAPER may not be installed yet"
 fi
 
 # ====================================================================

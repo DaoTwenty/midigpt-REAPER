@@ -24,7 +24,11 @@ echo   Keep this window open while using MIDI-GPT in REAPER.
 echo   Press Ctrl+C to stop the server.
 echo.
 
-midigpt-http --pretrained yellow --port 3456
+if "%~1"=="" (
+    midigpt-http --pretrained yellow --port 3456
+) else (
+    midigpt-http --port 3456 %*
+)
 
 echo.
 echo Server stopped.

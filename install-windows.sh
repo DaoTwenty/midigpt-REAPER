@@ -352,20 +352,6 @@ if [ "$SKIP_DEPS" = false ]; then
         warn "uv not found"
     fi
 
-    if find_protobuf; then
-        ok "protobuf found ($PROTOBUF_SOURCE)"
-    else
-        MISSING+=("protobuf")
-        warn "protobuf dev files not found"
-    fi
-
-    if check_cmd cmake; then
-        ok "cmake found"
-    else
-        MISSING+=("cmake")
-        warn "cmake not found"
-    fi
-
     if check_cmd git; then
         ok "git found"
     else
@@ -389,25 +375,11 @@ if [ "$SKIP_DEPS" = false ]; then
             info "Installing via $INSTALLER..."
             for dep in "${MISSING[@]}"; do
                 case "$dep" in
-                    "protobuf")
-                        if ! find_vcpkg; then
-                            bootstrap_vcpkg
-                        fi
-                        info "Installing protobuf:$VCPKG_TRIPLET via vcpkg..."
-                        cmd.exe //c "$(to_windows_path "$VCPKG_ROOT_RESOLVED/vcpkg.exe")" install "protobuf:$VCPKG_TRIPLET" || fail "vcpkg protobuf install failed"
-                        ;;
                     "uv")
                         if [ "$INSTALLER" = "winget" ]; then
                             winget install --id=astral-sh.uv -e --accept-package-agreements --accept-source-agreements
                         else
                             choco install uv -y
-                        fi
-                        ;;
-                    "cmake")
-                        if [ "$INSTALLER" = "winget" ]; then
-                            winget install Kitware.CMake --accept-package-agreements --accept-source-agreements
-                        else
-                            choco install cmake -y
                         fi
                         ;;
                     "git")
@@ -422,23 +394,17 @@ if [ "$SKIP_DEPS" = false ]; then
         else
             echo "Please install the missing dependencies manually, then re-run:"
             echo "  winget install --id=astral-sh.uv -e"
-            echo "  winget install Kitware.CMake"
             echo "  winget install Git.Git"
-            echo "  git clone https://github.com/microsoft/vcpkg.git \"$(get_default_vcpkg_root)\""
-            echo "  cmd /c \"$(to_windows_path "$(get_default_vcpkg_root)")\\bootstrap-vcpkg.bat -disableMetrics\""
-            echo "  vcpkg install protobuf:$VCPKG_TRIPLET"
             fail "Missing dependencies"
         fi
     fi
 
     check_cmd "$UV_CMD" || fail "uv is required but not found"
     hash -r
-    find_protobuf || fail "protobuf is required but could not be resolved to include/ and libprotobuf.lib. Install protobuf:$VCPKG_TRIPLET via vcpkg."
     ok "All system dependencies satisfied"
 else
     step "Step 1/6: Skipping dependency check (--skip-deps)"
     check_cmd "$UV_CMD" || fail "uv is required but not found"
-    find_protobuf || fail "protobuf is required but could not be resolved to include/ and libprotobuf.lib. Install protobuf:$VCPKG_TRIPLET via vcpkg."
 fi
 
 step "Step 2/6: Setting up Python virtual environment"
@@ -491,24 +457,35 @@ step "Step 3/6: Installing MIDI-GPT backend"
 MIDIGPT_SIBLING="$REPO_DIR/../MIDI-GPT"
 MIDIGPT_SRC_WIN=""
 
-if [ -n "$MIDIGPT_REFACTOR_SRC" ] && [ -d "$MIDIGPT_REFACTOR_SRC" ]; then
-    MIDIGPT_SRC_WIN="$MIDIGPT_REFACTOR_SRC"
+if [ -n "$MIDIGPT_SRC" ] && [ -d "$MIDIGPT_SRC" ]; then
+    MIDIGPT_SRC_WIN="$MIDIGPT_SRC"
 elif [ -d "$MIDIGPT_SIBLING" ]; then
     MIDIGPT_SRC_WIN="$MIDIGPT_SIBLING"
 fi
 
 if [ -n "$MIDIGPT_SRC_WIN" ]; then
     info "Installing midigpt[http,inference] from $MIDIGPT_SRC_WIN ..."
-    # Install with extras using editable mode via uv
     "$UV_CMD" pip install --python "$VENV_PYTHON" -e "${MIDIGPT_SRC_WIN}[http,inference]"
-    
-    if venv_python -c "from midigpt.inference.engine import InferenceEngine" >/dev/null 2>&1; then
-        ok "MIDI-GPT backend installed successfully"
-    else
-        fail "MIDI-GPT backend installation failed."
-    fi
 else
-    fail "MIDI-GPT source directory not found. Please make sure the MIDI-GPT repository is cloned next to this directory."
+    info "Installing midigpt[http,inference] from PyPI ..."
+    if ! "$UV_CMD" pip install --python "$VENV_PYTHON" "midigpt[http,inference]"; then
+        warn "PyPI install failed — falling back to cloning MIDI-GPT from GitHub ..."
+        MIDIGPT_CLONE="$(cd "$REPO_DIR/.." && pwd)/MIDI-GPT"
+        if [ ! -d "$MIDIGPT_CLONE/.git" ]; then
+            git clone https://github.com/Metacreation-Lab/MIDI-GPT.git "$MIDIGPT_CLONE" \
+                || fail "Failed to clone MIDI-GPT. Check your internet connection and try again."
+        else
+            info "Existing MIDI-GPT clone found at $MIDIGPT_CLONE"
+        fi
+        "$UV_CMD" pip install --python "$VENV_PYTHON" -e "${MIDIGPT_CLONE}[http,inference]" \
+            || fail "Source install from cloned MIDI-GPT also failed."
+    fi
+fi
+
+if venv_python -c "from midigpt.inference.engine import InferenceEngine" >/dev/null 2>&1; then
+    ok "MIDI-GPT backend installed successfully"
+else
+    fail "MIDI-GPT backend installation failed."
 fi
 
 info "Installing plugin dependencies..."

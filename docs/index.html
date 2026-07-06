@@ -131,10 +131,16 @@
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
 
-  /* ── Badges (img in first p) ────────────────────────────────────────────── */
-  #content > p:first-of-type img,
-  #content img[src*="shields.io"],
-  #content img[src*="drive.google.com"] {
+  /* ── Logo ───────────────────────────────────────────────────────────────── */
+  #content .lab-logo {
+    display: block;
+    max-height: 60px;
+    width: auto;
+    margin-bottom: 1.25rem;
+  }
+
+  /* ── Badges ─────────────────────────────────────────────────────────────── */
+  #content img[src*="shields.io"] {
     display: inline;
     vertical-align: middle;
     margin: 0 0.15rem 0.2rem 0;
@@ -281,6 +287,11 @@
 
   function render(md) {
     contentEl.innerHTML = marked.parse(md);
+    // Fix logo src: README uses a root-relative path; from docs/ it needs ../
+    contentEl.querySelectorAll('img[src*="logo.svg"]').forEach(function (img) {
+      img.src = 'assets/logo.svg';
+      img.classList.add('lab-logo');
+    });
     buildTOC();
   }
 
@@ -341,7 +352,7 @@
   opened from the filesystem (file:// blocks fetch). Run: python build_docs.py
 -->
 <script id="readme-source" type="text/plain">
-[![Metacreation Lab](https://drive.google.com/uc?export=view&id=1nzeq0DmD7hAYteRs5PA42150HIzO3Sz7)](https://metacreation.net/category/projects/)
+[![Metacreation Lab](docs/assets/logo.svg)](https://metacreation.net/category/projects/)
 
 # MIDI-GPT for REAPER
 

@@ -1,4 +1,4 @@
-[![Metacreation Lab](https://drive.google.com/uc?export=view&id=1nzeq0DmD7hAYteRs5PA42150HIzO3Sz7)](https://metacreation.net/category/projects/)
+[![Metacreation Lab](docs/assets/logo.svg)](https://metacreation.net/category/projects/)
 
 # MIDI-GPT for REAPER
 
