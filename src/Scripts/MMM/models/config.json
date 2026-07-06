@@ -1,6 +1,8 @@
 {
   "ckpt": "model.pt",
   "label": "MMM (YELLOW Encoder)",
+  "refactor_ckpt": "~/creative_labs/MIDI-GPT/models/yellow.pt",
+  "refactor_encoder_config": "~/creative_labs/MIDI-GPT/models/yellow_config.json",
   "track_fx_id": 349583025,
   "ac_schema": [
     {

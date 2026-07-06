@@ -483,9 +483,17 @@ class REAPERMIDIExtractor:
         """Get current time selection in REAPER"""
         is_set, is_loop, start_time, end_time, allowautoseek = RPR_GetSet_LoopTimeRange(0, 0, 0, 0, 0)
         
-        # Convert times to measures
+        # Convert times to measures.
+        # end_time typically lands exactly on a bar boundary (the START of the
+        # next bar). Floating-point fuzz can push time_to_measure into the next
+        # bar, giving an off-by-one extra measure. Step back by a tiny epsilon
+        # so we resolve the LAST included bar, then +1 for exclusive end.
+        EPS = 1e-6
         start_measure = self.tempo_map.time_to_measure(start_time) if start_time > 0 else 0
-        end_measure = self.tempo_map.time_to_measure(end_time) if end_time > 0 else 0
+        if end_time > start_time:
+            end_measure = self.tempo_map.time_to_measure(end_time - EPS) + 1
+        else:
+            end_measure = 0
         
         return TimeSelection(
             start_time=start_time,
