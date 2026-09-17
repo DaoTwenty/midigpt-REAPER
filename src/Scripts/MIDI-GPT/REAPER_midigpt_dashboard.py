@@ -42,7 +42,6 @@ import imgui
 import REAPER_midigpt_infill as infill
 import REAPER_midigpt_setup_tracks as setup_tracks
 import REAPER_midigpt_set_server as set_server
-import REAPER_midigpt_set_soundfont_template as set_soundfont_template
 import REAPER_midigpt_apply_soundfont_template as apply_soundfont_template
 
 # ---------------------------------------------------------------------------
@@ -417,7 +416,6 @@ def set_server_and_refresh():
 ACTIONS = {
     "set_server":              set_server_and_refresh,
     "setup_tracks":            setup_tracks.run_setup_tracks,
-    "set_soundfont_template":  set_soundfont_template.run_set_soundfont_template,
     "apply_soundfont_template": apply_soundfont_template.run_apply_soundfont_template,
     "run_infill":              start_infill,
     "refresh_model":           refresh_model_type,
@@ -463,11 +461,7 @@ def draw_actions():
         clicked = "setup_tracks"
 
     imgui.SameLine(ctx)
-    if imgui.Button(ctx, "Use Selected Track as SoundFont Template"):
-        clicked = "set_soundfont_template"
-
-    imgui.SameLine(ctx)
-    if imgui.Button(ctx, "Apply Template to Selected Tracks"):
+    if imgui.Button(ctx, "Force Re-setup Selected Tracks"):
         clicked = "apply_soundfont_template"
 
     if imgui.Button(ctx, "Run Infill", -1, 32):
