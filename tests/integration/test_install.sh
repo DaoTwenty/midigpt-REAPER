@@ -141,9 +141,12 @@ info "Running install.sh ..."
 echo ""
 
 INSTALL_LOG="$WORK_DIR/install.log"
-# Run with REAPER config skip to prevent mutating system reaper.ini in tests
+# --skip-reaper-config avoids mutating a real reaper.ini; MIDIGPT_REAPER_DIR
+# (see install.sh) points the REAPER integration step at a throwaway
+# directory instead of the real REAPER install, so this test never touches
+# the machine's actual REAPER config either.
 export MIDIGPT_SYSTEM_SITE_PACKAGES=true
-export PYTHON_CMD="/Users/paultriana/creative_labs/MIDI-GPT/.venv/bin/python"
+export MIDIGPT_REAPER_DIR="$WORK_DIR/fake-reaper"
 if bash "$CLONE_DIR/install.sh" --skip-reaper-config 2>&1 | tee "$INSTALL_LOG"; then
     echo ""
     pass "install.sh completed successfully"
@@ -177,16 +180,11 @@ assert "import midigpt.inference" bash -c "source '$VENV' && python -c 'from mid
 
 # Project scripts are verified via unit tests below
 
-# 5. REAPER symlinks (macOS)
-if [ "$(uname -s)" = "Darwin" ]; then
-    REAPER_DIR="$HOME/Library/Application Support/REAPER"
-    if [ -d "$REAPER_DIR" ]; then
-        assert_link "$REAPER_DIR/Scripts/MIDI-GPT"
-        assert_link "$REAPER_DIR/Effects/MIDI-GPT"
-    else
-        info "REAPER not installed — skipping symlink checks"
-    fi
-fi
+# 5. REAPER symlinks, in the fake MIDIGPT_REAPER_DIR set above (not a real
+# REAPER install). Only Scripts/MIDI-GPT is created now -- the
+# Effects/MIDI-GPT (JSFX) symlink was removed along with legacy JSFX
+# support in favor of the dashboard-only workflow.
+assert_link "$MIDIGPT_REAPER_DIR/Scripts/MIDI-GPT"
 
 # 6. Run unit tests
 echo ""
