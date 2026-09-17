@@ -20,6 +20,8 @@ src/Scripts/composers_assistant_v2/models_permuted_labels/
 /.venv
 /.wheel-build-venv/
 /wheelhouse/
+/soundfonts/
+*.sf2
 *.zip
 *.xml
 *.html

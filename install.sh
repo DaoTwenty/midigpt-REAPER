@@ -6,13 +6,21 @@
 #   1. System dependencies (git, python)
 #   2. Python virtual environment + torch
 #   3. MIDI-GPT backend library
-#   4. REAPER symlinks (Scripts)
+#   4. REAPER symlinks (Scripts), plus ReaPack and ReaImGui (the dashboard
+#      UI's REAPER extension dependencies)
 #   5. Verification of installation
 #
-# The plugin's dashboard UI also requires the ReaImGui REAPER extension,
-# which this installer cannot install for you (it's a REAPER extension, not
-# a Python package) -- it checks whether it's present and tells you how to
-# get it via ReaPack if not.
+# ReaPack itself is installed directly (it's just an extension binary,
+# downloaded over HTTPS from its GitHub release and checksum-verified
+# against GitHub's own published digest before use -- it isn't code-signed,
+# so this is the only integrity check available for it). The dashboard
+# UI's ReaImGui extension can only be installed through REAPER's own
+# ReaPack API while REAPER is running, so this installer queues it to
+# install automatically the next time REAPER starts (via a small
+# Scripts/__startup.lua bootstrap) -- if REAPER is currently open, it asks
+# permission to close it first (never force-killed; any unsaved project
+# still prompts to save) so both this and the reaper.ini setup below can
+# run in the same pass, then reopens REAPER for you.
 #
 # Usage:
 #   ./install.sh              # Full install
@@ -58,12 +66,115 @@ check_cmd() {
     command -v "$1" &>/dev/null
 }
 
+reaper_is_running() {
+    # Test-only override (see tests/integration/) -- simulates REAPER
+    # being open without needing a real REAPER process running.
+    if [ -n "${MIDIGPT_FAKE_REAPER_RUNNING:-}" ]; then
+        [ "$MIDIGPT_FAKE_REAPER_RUNNING" = "true" ]
+        return
+    fi
+    pgrep -x "REAPER" >/dev/null 2>&1 || pgrep -x "reaper" >/dev/null 2>&1
+}
+
+# Ask REAPER to quit gracefully (triggers its own "save changes?" prompt if
+# needed -- never force-kills) and wait for the process to actually exit.
+quit_reaper_and_wait() {
+    info "Asking REAPER to quit -- any unsaved project will prompt you to save first..."
+    if [ "$PLATFORM" = "macos" ]; then
+        osascript -e 'tell application "REAPER" to quit' 2>/dev/null
+    else
+        pkill -TERM -x reaper 2>/dev/null
+    fi
+
+    local waited=0
+    while reaper_is_running && [ "$waited" -lt 120 ]; do
+        sleep 2
+        waited=$((waited + 2))
+    done
+
+    if reaper_is_running; then
+        warn "REAPER is still open (it may be waiting on a save prompt)."
+        read -rp "  Close it manually, then press Enter to continue (Ctrl+C to abort): " _
+    fi
+}
+
+relaunch_reaper() {
+    if [ "$PLATFORM" = "macos" ]; then
+        open -a REAPER 2>/dev/null
+    elif check_cmd reaper; then
+        nohup reaper >/dev/null 2>&1 &
+        disown 2>/dev/null || true
+    else
+        warn "Could not find a 'reaper' command to relaunch it automatically -- start it manually."
+        return 1
+    fi
+    return 0
+}
+
+open_url() {
+    local url="$1"
+    if [ "$PLATFORM" = "macos" ]; then
+        open "$url" 2>/dev/null
+    elif [ "$PLATFORM" = "windows" ]; then
+        cmd.exe /c start "" "$url" 2>/dev/null
+    else
+        xdg-open "$url" 2>/dev/null
+    fi
+}
+
+# Downloads the Arachno GM SoundFont into this repo's own soundfonts/
+# folder (kept alongside the plugin, not scattered into REAPER's resource
+# dir), under its real filename -- REAPER_midigpt_setup_tracks.py reads
+# whatever .sf2 is actually there rather than a hardcoded name, so this
+# doesn't need to match anything else exactly. Arachno is freeware and this
+# is the exact .zip Arachnosoft's own download page links to (mirrored on
+# Dropbox) -- not a third-party scrape. Sforzando itself is a real
+# application installer, not a data file, so it's intentionally NOT
+# auto-installed the same way (see the instrument-setup prompt below).
+download_arachno_soundfont() {
+    if ! check_cmd unzip; then
+        warn "'unzip' not found -- install it, or get Arachno manually: https://www.arachnosoft.com/main/download.php?id=soundfont-sf2"
+        return 1
+    fi
+
+    local dest_dir="$REPO_DIR/soundfonts"
+    if find "$dest_dir" -iname "*.sf2" 2>/dev/null | grep -q .; then
+        ok "Arachno SoundFont already present in $dest_dir"
+        return 0
+    fi
+
+    info "Downloading Arachno SoundFont (~140MB, may take a few minutes)..."
+    mkdir -p "$dest_dir"
+    local tmp_zip
+    tmp_zip="$(mktemp).zip"
+    if ! curl -fL --max-time 900 -o "$tmp_zip" "https://www.dropbox.com/s/2rnpya9ecb9m4jh/arachno-soundfont-10-sf2.zip?dl=1"; then
+        warn "Failed to download Arachno SoundFont -- get it manually: https://www.arachnosoft.com/main/download.php?id=soundfont-sf2"
+        rm -f "$tmp_zip"
+        return 1
+    fi
+
+    local inner_name dest_file
+    inner_name="$(unzip -Z1 "$tmp_zip" 2>/dev/null | grep -i '\.sf2$' | head -1)"
+    dest_file="$dest_dir/$inner_name"
+    if [ -z "$inner_name" ] || ! unzip -p "$tmp_zip" "$inner_name" > "$dest_file" 2>/dev/null; then
+        warn "Downloaded archive didn't extract cleanly -- get Arachno manually: https://www.arachnosoft.com/main/download.php?id=soundfont-sf2"
+        rm -f "$tmp_zip" "$dest_file"
+        return 1
+    fi
+    rm -f "$tmp_zip"
+    ok "Arachno SoundFont installed: $dest_file"
+    return 0
+}
+
 # ── Args ────────────────────────────────────────────────────────
+
+REAPER_ONLY=false
 
 for arg in "$@"; do
     case "$arg" in
         --skip-deps) SKIP_DEPS=true ;;
         --skip-reaper-config) SKIP_REAPER_CONFIG=true ;;
+        --reaper-only) REAPER_ONLY=true ;;
         --midigpt-src=*)
             MIDIGPT_SRC="${arg#*=}"
             ;;
@@ -75,12 +186,16 @@ for arg in "$@"; do
             echo "Options:"
             echo "  --skip-deps          Skip system dependency check"
             echo "  --skip-reaper-config Skip automatic REAPER Python/ReaScript configuration"
+            echo "  --reaper-only        Only do REAPER integration (Step 4/5: symlinks, ReaPack,"
+            echo "                       ReaImGui, reaper.ini) -- skips venv/backend entirely."
+            echo "                       Useful to redo just the REAPER side, or for testing."
             echo "  --midigpt-src=PATH   Path to the MIDI-GPT source repository (sibling folder by default)"
             echo "  --help               Show this help"
             echo ""
             echo "Examples:"
             echo "  ./install.sh                                   # Full installation"
             echo "  ./install.sh --midigpt-src=/custom/path        # Custom MIDI-GPT source path"
+            echo "  ./install.sh --reaper-only                     # Just (re)do REAPER integration"
             exit 0
             ;;
         *) warn "Unknown option: $arg" ;;
@@ -106,9 +221,24 @@ case "$OS" in
 esac
 info "Platform: $PLATFORM ($OS)"
 
+if [ "$REAPER_ONLY" = true ]; then
+    step "Skipping system deps / venv / backend (--reaper-only)"
+    # Still need a python to detect the ReaScript library path in Step 5.
+    if [ -z "${PYTHON_CMD:-}" ]; then
+        for cmd in python3.12 python3.11 python3.10 python3; do
+            if check_cmd "$cmd"; then
+                PYTHON_CMD="$cmd"
+                break
+            fi
+        done
+    fi
+fi
+
 # ====================================================================
 # Step 1: System Dependencies
 # ====================================================================
+
+if [ "$REAPER_ONLY" = false ]; then
 
 if [ "$SKIP_DEPS" = false ]; then
     step "Step 1/6: Checking system dependencies"
@@ -149,6 +279,17 @@ if [ "$SKIP_DEPS" = false ]; then
         warn "git not found"
     fi
 
+    # -- curl -- required for ReaPack/Arachno downloads (Step 4) and for
+    # bootstrapping Homebrew below if that's needed too. Present by default
+    # on macOS and most desktop Linux distros, but not guaranteed on
+    # minimal/server/HPC-cluster Linux images.
+    if check_cmd curl; then
+        ok "curl $(curl --version | head -1 | awk '{print $2}')"
+    else
+        MISSING+=("curl")
+        warn "curl not found"
+    fi
+
     # -- Install missing deps --
     if [ ${#MISSING[@]} -gt 0 ]; then
         echo ""
@@ -168,6 +309,14 @@ if [ "$SKIP_DEPS" = false ]; then
             fi
         elif [[ " ${MISSING[*]} " == *"git"* ]] && [ "$PLATFORM" = "linux" ]; then
             fail "Please install git (e.g. sudo apt install git) then re-run"
+        fi
+
+        if [[ " ${MISSING[*]} " == *"curl"* ]]; then
+            if [ "$PLATFORM" = "linux" ]; then
+                fail "Please install curl (e.g. sudo apt install curl, or ask your cluster admin / try 'module load curl') then re-run"
+            else
+                fail "Please install curl then re-run"
+            fi
         fi
 
         # Python missing — give platform-specific install guidance
@@ -307,13 +456,22 @@ info "Installing plugin dependencies..."
 pip install -e "$REPO_DIR" -q 2>/dev/null || pip install -e "$REPO_DIR"
 ok "Plugin dependencies installed"
 
+fi # REAPER_ONLY == false (Steps 1-3)
+
 # ====================================================================
-# Step 4: REAPER Integration (Symlinks)
+# Step 4: REAPER Integration (Symlinks, ReaPack, ReaImGui)
 # ====================================================================
 
 step "Step 4/6: Setting up REAPER integration"
 
-if [ "$PLATFORM" = "macos" ]; then
+if [ -n "${MIDIGPT_REAPER_DIR:-}" ]; then
+    # Test-only override (see tests/integration/) -- lets the REAPER
+    # integration logic run against a disposable fake directory instead of
+    # the real REAPER install, so different starting states (empty,
+    # ReaPack already present, existing reaper.ini content, etc.) can be
+    # exercised repeatably without ever touching a real machine's REAPER.
+    REAPER_DIR="$MIDIGPT_REAPER_DIR"
+elif [ "$PLATFORM" = "macos" ]; then
     REAPER_DIR="$HOME/Library/Application Support/REAPER"
 elif [ "$PLATFORM" = "windows" ]; then
     REAPER_DIR="$APPDATA/REAPER"
@@ -321,7 +479,32 @@ else
     REAPER_DIR="$HOME/.config/REAPER"
 fi
 
+REAPER_WAS_CLOSED_BY_US=false
+
 if [ -d "$REAPER_DIR" ]; then
+    # Installing ReaPack and configuring reaper.ini (Step 5) both need REAPER
+    # closed. Ask once, up front, so both steps can run this pass instead of
+    # telling the user to re-run the installer later.
+    if reaper_is_running; then
+        if [ -t 0 ]; then
+            warn "REAPER is currently running."
+            echo "  Installing ReaPack and configuring REAPER (reaper.ini) both require REAPER"
+            echo "  to be closed. Nothing is discarded silently -- REAPER will prompt you to"
+            echo "  save any unsaved project first, same as quitting normally."
+            read -rp "  Close REAPER now and continue? [y/N]: " _CLOSE_REAPER
+            if [[ "$_CLOSE_REAPER" =~ ^[Yy]$ ]]; then
+                quit_reaper_and_wait
+                if ! reaper_is_running; then
+                    REAPER_WAS_CLOSED_BY_US=true
+                fi
+            else
+                warn "Continuing with REAPER open -- ReaPack install and reaper.ini setup will be skipped this run."
+            fi
+        else
+            warn "REAPER is currently running -- ReaPack install and reaper.ini setup will be skipped (non-interactive)."
+        fi
+    fi
+
     for pair in \
         "$REPO_DIR/src/Scripts/MIDI-GPT:$REAPER_DIR/Scripts/MIDI-GPT"
     do
@@ -334,10 +517,135 @@ if [ -d "$REAPER_DIR" ]; then
     done
     ok "REAPER symlinks created"
 
+    # -- ReaPack + ReaImGui --
+    REAPACK_READY=false
+    if find "$REAPER_DIR/UserPlugins" -iname "reaper_reapack*" 2>/dev/null | grep -q .; then
+        ok "ReaPack already installed"
+        REAPACK_READY=true
+    elif reaper_is_running; then
+        warn "ReaPack not installed, and REAPER is still open -- skipping (re-run after closing REAPER, or install manually: https://reapack.com/)"
+    else
+        info "Installing ReaPack..."
+        ARCH="$(uname -m)"
+        REAPACK_ASSET=""
+        case "$PLATFORM:$ARCH" in
+            macos:arm64|macos:aarch64) REAPACK_ASSET="reaper_reapack-arm64.dylib" ;;
+            macos:x86_64)              REAPACK_ASSET="reaper_reapack-x86_64.dylib" ;;
+            linux:aarch64|linux:arm64) REAPACK_ASSET="reaper_reapack-aarch64.so" ;;
+            linux:x86_64)              REAPACK_ASSET="reaper_reapack-x86_64.so" ;;
+            linux:armv7l)              REAPACK_ASSET="reaper_reapack-armv7l.so" ;;
+            linux:i686)                REAPACK_ASSET="reaper_reapack-i686.so" ;;
+            windows:*)                 REAPACK_ASSET="reaper_reapack-x64.dll" ;;
+        esac
+
+        if [ -n "$REAPACK_ASSET" ]; then
+            mkdir -p "$REAPER_DIR/UserPlugins"
+            REAPACK_URL="https://github.com/cfillion/reapack/releases/latest/download/$REAPACK_ASSET"
+            REAPACK_DEST="$REAPER_DIR/UserPlugins/$REAPACK_ASSET"
+
+            # ReaPack's own releases aren't code-signed, so there's no
+            # signature to verify -- fetch GitHub's published SHA256 for
+            # this exact asset instead, so we can at least catch a
+            # corrupted or tampered-with download before trusting it.
+            # Fetched with curl (system trust store, same as the download
+            # itself) rather than python's urllib -- a python installed
+            # without its CA bootstrap (common with the official
+            # python.org macOS installer, before running its "Install
+            # Certificates.command") would otherwise fail here silently.
+            # python is only used to parse the already-fetched JSON text.
+            REAPACK_EXPECTED_SHA=""
+            REAPACK_RELEASE_JSON="$(curl -fsSL "https://api.github.com/repos/cfillion/reapack/releases/latest" 2>/dev/null)"
+            if [ -n "$REAPACK_RELEASE_JSON" ] && check_cmd python3; then
+                REAPACK_EXPECTED_SHA="$(printf '%s' "$REAPACK_RELEASE_JSON" | python3 -c "
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    for a in data.get('assets', []):
+        if a['name'] == '$REAPACK_ASSET':
+            print(a.get('digest', '').replace('sha256:', ''))
+            break
+except Exception:
+    pass
+" 2>/dev/null)"
+            fi
+
+            if curl -fsSL "$REAPACK_URL" -o "$REAPACK_DEST"; then
+                REAPACK_VERIFIED=true
+                if [ -n "$REAPACK_EXPECTED_SHA" ]; then
+                    REAPACK_ACTUAL_SHA="$( (shasum -a 256 "$REAPACK_DEST" 2>/dev/null || sha256sum "$REAPACK_DEST" 2>/dev/null) | awk '{print $1}')"
+                    if [ "$REAPACK_ACTUAL_SHA" != "$REAPACK_EXPECTED_SHA" ]; then
+                        REAPACK_VERIFIED=false
+                    fi
+                else
+                    warn "Could not fetch an expected checksum for ReaPack -- installing unverified"
+                fi
+
+                if [ "$REAPACK_VERIFIED" = true ]; then
+                    if [ "$PLATFORM" = "macos" ]; then
+                        # curl-downloaded files can still end up quarantined
+                        # on recent macOS, which silently blocks REAPER
+                        # from loading the extension until the user
+                        # manually approves it in System Settings > Privacy
+                        # & Security. Strip it ourselves, now that the
+                        # checksum above confirms it's what GitHub actually
+                        # published -- this is our own file, in our own
+                        # user directory, so no elevated privileges needed.
+                        xattr -d com.apple.quarantine "$REAPACK_DEST" 2>/dev/null || true
+                    fi
+                    ok "ReaPack installed and checksum-verified ($REAPACK_ASSET)"
+                    REAPACK_READY=true
+                else
+                    rm -f "$REAPACK_DEST"
+                    warn "Downloaded ReaPack didn't match GitHub's published checksum -- discarded. Install manually: https://reapack.com/"
+                fi
+            else
+                warn "Failed to download ReaPack -- install manually: https://reapack.com/"
+            fi
+        else
+            warn "Unrecognized platform/architecture ($PLATFORM/$ARCH) -- install ReaPack manually: https://reapack.com/"
+        fi
+    fi
+
     if ! find "$REAPER_DIR/UserPlugins" -iname "*imgui*" 2>/dev/null | grep -q .; then
-        warn "ReaImGui extension not found — the dashboard UI needs it"
-        echo "  In REAPER: Extensions > ReaPack > Browse packages > search 'ReaImGui' > install > restart REAPER"
-        echo "  (Don't have ReaPack? Get it first: https://reapack.com/)"
+        if [ "$REAPACK_READY" = true ]; then
+            info "Queuing ReaImGui install for the next REAPER launch..."
+            STARTUP_LUA="$REAPER_DIR/Scripts/__startup.lua"
+            BEGIN_MARK="-- BEGIN MIDI-GPT ReaImGui bootstrap (safe to delete this block)"
+            END_MARK="-- END MIDI-GPT ReaImGui bootstrap"
+            mkdir -p "$(dirname "$STARTUP_LUA")"
+            touch "$STARTUP_LUA"
+
+            BLOCK_TMP="$(mktemp)"
+            cat > "$BLOCK_TMP" << 'LUA_EOF'
+if not reaper.APIExists("ImGui_CreateContext") then
+  reaper.ReaPack_AddSetRepository("ReaTeam Extensions", "https://github.com/ReaTeam/Extensions/raw/master/index.xml", true, 1)
+  reaper.ReaPack_ProcessQueue(true)
+end
+LUA_EOF
+
+            if grep -qF -- "$BEGIN_MARK" "$STARTUP_LUA"; then
+                awk -v b="$BEGIN_MARK" -v e="$END_MARK" -v blockfile="$BLOCK_TMP" '
+                    BEGIN { block = ""; while ((getline line < blockfile) > 0) block = block line "\n" }
+                    $0 == b { print; printf "%s", block; skip=1; next }
+                    $0 == e { print; skip=0; next }
+                    skip { next }
+                    { print }
+                ' "$STARTUP_LUA" > "${STARTUP_LUA}.tmp" && mv "${STARTUP_LUA}.tmp" "$STARTUP_LUA"
+            else
+                {
+                    echo ""
+                    echo "$BEGIN_MARK"
+                    cat "$BLOCK_TMP"
+                    echo "$END_MARK"
+                } >> "$STARTUP_LUA"
+            fi
+            rm -f "$BLOCK_TMP"
+            ok "ReaImGui will install automatically the next time REAPER starts"
+            warn "This also installs the other packages in the 'ReaTeam Extensions' repo (ReaBlink, ReaMCULive, js_ReaScriptAPI) -- all official ReaTeam-curated extensions, not just ReaImGui, since ReaPack can only auto-install per-repository, not per-package."
+        else
+            warn "ReaImGui extension not found — the dashboard UI needs it"
+            echo "  In REAPER: Extensions > ReaPack > Browse packages > search 'ReaImGui' > install > restart REAPER"
+        fi
     fi
 else
     warn "REAPER config directory not found — REAPER may not be installed yet"
@@ -355,7 +663,7 @@ step "Step 5/6: Configuring REAPER (reaper.ini)"
 REAPER_INI="$REAPER_DIR/reaper.ini"
 
 # Detect the Python dynamic library (dylib/so/dll) for REAPER
-PYTHON_DLL_PATH="$(python -c '
+PYTHON_DLL_PATH="$("${PYTHON_CMD:-python3}" -c '
 import sysconfig, pathlib, sys, os
 ver = f"{sys.version_info.major}.{sys.version_info.minor}"
 if sys.platform == "win32":
@@ -372,7 +680,7 @@ else:
 ')"
 
 if [ -f "$REAPER_INI" ]; then
-    if pgrep -x "REAPER" >/dev/null 2>&1 || pgrep -x "reaper" >/dev/null 2>&1; then
+    if reaper_is_running; then
         warn "REAPER is currently running!"
         echo "  REAPER overwrites reaper.ini on quit, so changes would be lost."
         echo "  Please quit REAPER and re-run this installer, or configure manually:"
@@ -456,6 +764,14 @@ else
 fi
 fi
 
+if [ "$REAPER_WAS_CLOSED_BY_US" = true ]; then
+    info "Reopening REAPER so ReaPack can load and finish setup automatically..."
+    if relaunch_reaper; then
+        ok "REAPER relaunched -- ReaImGui installs in the background over the next minute or two."
+    fi
+fi
+
+if [ "$REAPER_ONLY" = false ]; then
 # ====================================================================
 # Step 6: Verify Backend Installation
 # ====================================================================
@@ -502,6 +818,7 @@ DESKTOP_EOF
 else
     info "No Desktop folder found — skipping shortcut creation"
 fi
+fi # REAPER_ONLY == false (Step 6 + Desktop shortcut)
 
 # ====================================================================
 # Final: Summary and Next Steps
@@ -521,7 +838,6 @@ echo "     Select: $REAPER_DIR/Scripts/MIDI-GPT/REAPER_midigpt_dashboard.py   (p
 echo "     Select: $REAPER_DIR/Scripts/MIDI-GPT/REAPER_midigpt_infill.py"
 echo "     Select: $REAPER_DIR/Scripts/MIDI-GPT/REAPER_midigpt_set_server.py"
 echo "     Select: $REAPER_DIR/Scripts/MIDI-GPT/REAPER_midigpt_setup_tracks.py"
-echo "     Select: $REAPER_DIR/Scripts/MIDI-GPT/REAPER_midigpt_set_soundfont_template.py"
 echo "     Select: $REAPER_DIR/Scripts/MIDI-GPT/REAPER_midigpt_apply_soundfont_template.py"
 echo ""
 echo "  2. Run 'MIDI-GPT: Dashboard' — it's a single window for the whole"
@@ -534,22 +850,53 @@ echo "  (e.g. http://192.168.1.20:3456). Defaults to http://127.0.0.1:3456."
 echo ""
 echo -e "${BOLD}To start the server:${NC}"
 if [ -d "$HOME/Desktop" ]; then
-    echo "  Double-click ${GREEN}Start MIDI-GPT Server${NC} on your Desktop"
+    echo -e "  Double-click ${GREEN}Start MIDI-GPT Server${NC} on your Desktop"
 elif [ "$PLATFORM" = "macos" ]; then
-    echo "  Double-click: ${GREEN}Start Server - Mac.command${NC}"
+    echo -e "  Double-click: ${GREEN}Start Server - Mac.command${NC}"
 elif [ "$PLATFORM" = "windows" ]; then
-    echo "  Double-click: ${GREEN}Start Server - Windows.bat${NC}"
+    echo -e "  Double-click: ${GREEN}Start Server - Windows.bat${NC}"
 else
-    echo "  Run: ${GREEN}./start_midigpt_server.sh${NC}"
+    echo -e "  Run: ${GREEN}./start_midigpt_server.sh${NC}"
 fi
 echo "  Or from terminal: cd $REPO_DIR && source .venv/bin/activate && midigpt-http"
 echo ""
 
 # ====================================================================
-# Interactive: Launch server now?
+# Interactive: Instrument setup (Sforzando + Arachno)
 # ====================================================================
 
 if [ -t 0 ]; then
+    echo ""
+    echo -e "${BOLD}----------------------------------------------------${NC}"
+    echo -e "${BOLD}  Optional: Instrument Setup (Sforzando + Arachno)${NC}"
+    echo -e "${BOLD}----------------------------------------------------${NC}"
+    echo ""
+    echo "  MIDI-GPT tracks play through Sforzando (a free SFZ sampler) loaded"
+    echo "  with the Arachno General MIDI SoundFont -- see VST.md for the full"
+    echo "  setup."
+    echo ""
+    echo "  Sforzando is a real application installer (not just a data file),"
+    echo "  behind its own download page, so this installer opens that page for"
+    echo "  you rather than running an installer on your behalf."
+    read -rp "  Open the Sforzando download page in your browser now? [y/N]: " _OPEN_SFZ
+    if [[ "$_OPEN_SFZ" =~ ^[Yy]$ ]]; then
+        open_url "https://www.plogue.com/products/sforzando.html"
+        ok "Opened the Sforzando download page"
+    fi
+    echo ""
+    echo "  Arachno is just a SoundFont data file, so this installer can fetch"
+    echo "  it directly, into this repo's own soundfonts/ folder."
+    read -rp "  Download the Arachno GM SoundFont (~140MB) now? [y/N]: " _DL_ARACHNO
+    if [[ "$_DL_ARACHNO" =~ ^[Yy]$ ]]; then
+        download_arachno_soundfont || true
+    fi
+fi
+
+# ====================================================================
+# Interactive: Launch server now?
+# ====================================================================
+
+if [ -t 0 ] && [ "$REAPER_ONLY" = false ]; then
     echo ""
     echo -e "${BOLD}----------------------------------------------------${NC}"
     echo -e "${BOLD}  Launch Server${NC}"
