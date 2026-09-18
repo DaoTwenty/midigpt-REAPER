@@ -38,6 +38,8 @@ param(
     [switch]$SkipDeps,
     [switch]$SkipReaperConfig,
     [switch]$ReaperOnly,
+    [switch]$TorchGpu,
+    [switch]$Dev,
     [string]$MidigptSrc = "",
     [switch]$Help
 )
@@ -90,6 +92,20 @@ function Test-ReaperRunning {
     return $null -ne (Get-Process -Name "reaper" -ErrorAction SilentlyContinue)
 }
 
+function Test-BuildTools {
+    $Missing = @()
+    # Windows: need Visual Studio Build Tools + CMake for source installs
+    if (-not (Test-Command "cl.exe") -and -not (Test-Command "cmake")) {
+        $Missing += "Visual Studio Build Tools + CMake (winget install Microsoft.VisualStudio.2022.BuildTools; winget install Kitware.CMake)"
+    }
+    if ($Missing.Count -gt 0) {
+        Write-Warn "Source install requires compilation tools:"
+        foreach ($m in $Missing) { Write-Host "  - $m" }
+        return $false
+    }
+    return $true
+}
+
 # Ask REAPER to quit gracefully (taskkill without /F sends a close request
 # to the main window, so REAPER's own "save changes?" prompt still fires --
 # never force-killed) and wait for the process to actually exit.
@@ -112,6 +128,11 @@ function Invoke-ReaperQuitAndWait {
 }
 
 function Start-ReaperApp {
+    # Test-only override -- simulates REAPER relaunch without real process
+    if ($env:MIDIGPT_FAKE_REAPER_RUNNING) {
+        Write-Info "Test mode: skipping actual REAPER relaunch"
+        return $false
+    }
     $Candidates = @(
         (Join-Path $env:ProgramFiles "REAPER (x64)\reaper.exe"),
         (Join-Path $env:ProgramFiles "REAPER\reaper.exe")
@@ -129,7 +150,15 @@ function Start-ReaperApp {
     return $false
 }
 
-function Open-Url { param($Url) Start-Process $Url | Out-Null }
+function Open-Url { 
+    param($Url) 
+    try {
+        Start-Process $Url | Out-Null
+        return $true
+    } catch {
+        return $false
+    }
+}
 
 # Merge the MIDI-GPT ReaImGui bootstrap block into Scripts\__startup.lua,
 # replacing any previous block between the same markers in place (never
@@ -237,8 +266,17 @@ if ($Help) {
     Write-Host "  -ReaperOnly          Only do REAPER integration (Step 4/5: junction, ReaPack,"
     Write-Host "                       ReaImGui, reaper.ini) -- skips venv/backend entirely."
     Write-Host "                       Useful to redo just the REAPER side, or for testing."
+    Write-Host "  -TorchGpu            Install PyTorch with GPU support (CUDA)."
+    Write-Host "  -Dev                 Install plugin in editable mode for development."
     Write-Host "  -MidigptSrc PATH     Path to MIDI-GPT source repo (sibling folder by default)"
     Write-Host "  -Help                Show this help"
+    Write-Host ""
+    Write-Host "Examples:"
+    Write-Host "  .\install.ps1                              # Full installation (CPU torch)"
+    Write-Host "  .\install.ps1 -TorchGpu                    # Full installation with GPU torch"
+    Write-Host "  .\install.ps1 -Dev                         # Development install (editable)"
+    Write-Host "  .\install.ps1 -MidigptSrc C:\path\to\MIDI-GPT  # Custom MIDI-GPT source path"
+    Write-Host "  .\install.ps1 -ReaperOnly                  # Just (re)do REAPER integration"
     exit 0
 }
 
@@ -404,7 +442,11 @@ if ($LASTEXITCODE -eq 0) {
     Write-OK "PyTorch $TorchVer already installed"
 } else {
     Write-Info "Installing PyTorch (this may take a few minutes)..."
-    pip install torch
+    if ($TorchGpu) {
+        pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+    } else {
+        pip install torch
+    }
     python -c "import torch" 2>$null
     if ($LASTEXITCODE -eq 0) {
         $TorchVer = python -c "import torch; print(torch.__version__)" 2>$null
@@ -418,8 +460,10 @@ if ($LASTEXITCODE -eq 0) {
         Write-Host ""
         Write-Host "  1. Visit: https://pytorch.org/get-started/locally/"
         Write-Host "  2. Select your OS, package manager (pip), and Python version"
-        Write-Host "  3. Run the install command it gives you (with this venv activated)"
-        Write-Host "  4. Then re-run this installer"
+        Write-Host "  3. Run the install command it gives you WITH THIS VENV ACTIVATED:"
+        Write-Host "       .\\.venv\\Scripts\\Activate.ps1"
+        Write-Host "       pip install <command-from-pytorch-org>"
+        Write-Host "  4. Then re-run this installer (it will detect existing torch)"
         Write-Host ""
         Write-Fail "PyTorch installation failed. See instructions above."
     }
@@ -435,6 +479,8 @@ $MidigptSibling = Join-Path (Split-Path $RepoDir -Parent) "MIDI-GPT"
 
 if ($MidigptSrc -and (Test-Path $MidigptSrc)) {
     Write-Info "Installing midigpt[http,inference] from source: $MidigptSrc ..."
+    Test-BuildTools | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Fail "Missing build tools required for source install" }
     pip install -e "${MidigptSrc}[http,inference]" 2>&1
 } else {
     Write-Info "Installing midigpt[http,inference] from PyPI ..."
@@ -460,9 +506,15 @@ if ($LASTEXITCODE -eq 0) {
 }
 
 Write-Info "Installing plugin dependencies..."
-pip install -e $RepoDir -q 2>$null
-if ($LASTEXITCODE -ne 0) { pip install -e $RepoDir }
-Write-OK "Plugin dependencies installed"
+if ($Dev) {
+    pip install -e $RepoDir -q 2>$null
+    if ($LASTEXITCODE -ne 0) { pip install -e $RepoDir }
+    Write-OK "Plugin dependencies installed (editable mode)"
+} else {
+    pip install $RepoDir -q 2>$null
+    if ($LASTEXITCODE -ne 0) { pip install $RepoDir }
+    Write-OK "Plugin dependencies installed"
+}
 
 } # ReaperOnly == false (Steps 1-3)
 
@@ -506,6 +558,8 @@ if (Test-Path $ReaperDir) {
             }
         } else {
             Write-Warn "REAPER is currently running -- ReaPack install and reaper.ini setup will be skipped (non-interactive)."
+            Write-Host "  Close REAPER, then re-run this installer:"
+            Write-Host "    .\install.ps1"
         }
     }
 
@@ -588,11 +642,13 @@ if (Test-Path $ReaperDir) {
     if (Test-Path $UserPluginsDir) {
         $HasImgui = Get-ChildItem -Path $UserPluginsDir -Filter "*imgui*" -ErrorAction SilentlyContinue
     }
+    $ImGuiBootstrapWritten = $false
     if (-not $HasImgui) {
         if ($ReapackReady) {
             Write-Info "Queuing ReaImGui install for the next REAPER launch..."
             $StartupLua = Join-Path $ReaperDir "Scripts\__startup.lua"
             Set-StartupLuaBlock -StartupLuaPath $StartupLua
+            $ImGuiBootstrapWritten = $true
             Write-OK "ReaImGui will install automatically the next time REAPER starts"
             Write-Warn "This also installs the other packages in the 'ReaTeam Extensions' repo (ReaBlink, ReaMCULive, js_ReaScriptAPI) -- all official ReaTeam-curated extensions, not just ReaImGui, since ReaPack can only auto-install per-repository, not per-package."
         } else {
@@ -602,6 +658,9 @@ if (Test-Path $ReaperDir) {
     }
 } else {
     Write-Warn "REAPER config directory not found — REAPER may not be installed yet"
+    Write-Host "  Install REAPER: https://www.reaper.fm/download.php"
+    Write-Host "  Launch REAPER once, quit it, then re-run this installer:"
+    Write-Host "    .\install.ps1"
 }
 
 # ====================================================================
@@ -684,18 +743,56 @@ for p in base.glob(f'python{ver}.dll'):
             Write-Host "  Launch REAPER once, quit it, then re-run this installer to auto-configure."
         } else {
             Write-Warn "REAPER config directory not found — REAPER may not be installed"
+            Write-Host "  Install REAPER: https://www.reaper.fm/download.php"
+            Write-Host "  Launch REAPER once, quit it, then re-run this installer:"
+            Write-Host "    .\install.ps1"
         }
         if ($PythonDll) {
-            Write-Host "  When ready, set the Python library path to:"
-            Write-Host "    $PythonDll" -ForegroundColor Green
+            Write-Host ""
+            Write-Host "  Manual REAPER configuration required:"
+            Write-Host "  1. Open REAPER"
+            Write-Host "  2. Options > Preferences > Plug-Ins > ReaScript"
+            Write-Host "  3. Enable 'ReaScript' (checkbox)"
+            Write-Host "  4. Set 'Python library' to:"
+            Write-Host "       $PythonDll" -ForegroundColor Green
+            Write-Host "  5. Click OK, then RESTART REAPER for changes to take effect."
         }
     }
 }
 
-if ($ReaperWasClosedByUs) {
-    Write-Info "Reopening REAPER so ReaPack can load and finish setup automatically..."
+# Check if we need to launch REAPER for ImGui install (either we closed it, or
+# ImGui bootstrap was written and REAPER isn't running)
+$NeedReaperForImGui = $false
+if ($ReaperWasClosedByUs -or $ImGuiBootstrapWritten) {
+    if (-not (Test-ReaperRunning)) {
+        $NeedReaperForImGui = $true
+    }
+}
+
+if ($NeedReaperForImGui) {
+    Write-Info "Launching REAPER to install ReaImGui via ReaPack..."
     if (Start-ReaperApp) {
-        Write-OK "REAPER relaunched -- ReaImGui installs in the background over the next minute or two."
+        Write-OK "REAPER launched -- waiting for ReaImGui to install (up to 120s)..."
+        # Poll for ImGui binary in UserPlugins
+        $Waited = 0
+        $ImGuiFound = $false
+        while ($Waited -lt 120) {
+            $ImGuiCheck = Get-ChildItem -Path $UserPluginsDir -Filter "*imgui*" -ErrorAction SilentlyContinue
+            if ($ImGuiCheck) {
+                $ImGuiFound = $true
+                break
+            }
+            Start-Sleep -Seconds 5
+            $Waited += 5
+        }
+        if ($ImGuiFound) {
+            Write-OK "ReaImGui installed successfully"
+        } else {
+            Write-Warn "ReaImGui not detected yet (may still be installing in background)"
+        }
+        # Close REAPER gracefully so user starts fresh
+        Invoke-ReaperQuitAndWait
+        Write-Info "REAPER closed. Setup complete — start REAPER when ready to use MIDI-GPT."
     }
 }
 
@@ -796,8 +893,12 @@ if (Test-Interactive) {
     Write-Host "  you rather than running an installer on your behalf."
     $OpenSfz = Read-Host "  Open the Sforzando download page in your browser now? [y/N]"
     if ($OpenSfz -match "^[Yy]$") {
-        Open-Url "https://www.plogue.com/products/sforzando.html"
-        Write-OK "Opened the Sforzando download page"
+        if (Open-Url "https://www.plogue.com/products/sforzando.html") {
+            Write-OK "Opened the Sforzando download page"
+        } else {
+            Write-Warn "Could not open browser automatically"
+            Write-Host "  Visit manually: https://www.plogue.com/products/sforzando.html"
+        }
     }
     Write-Host ""
     Write-Host "  Arachno is just a SoundFont data file, so this installer can fetch"

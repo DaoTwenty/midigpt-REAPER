@@ -66,6 +66,35 @@ check_cmd() {
     command -v "$1" &>/dev/null
 }
 
+check_build_tools() {
+    local missing=()
+    case "$PLATFORM" in
+        macos)
+            if ! check_cmd xcodebuild; then
+                missing+=("Xcode Command Line Tools (run: xcode-select --install)")
+            fi
+            ;;
+        linux)
+            if ! check_cmd gcc || ! check_cmd cmake; then
+                missing+=("build tools: gcc, cmake (e.g. sudo apt install build-essential cmake)")
+            fi
+            ;;
+        windows)
+            if ! check_cmd cl.exe && ! check_cmd cmake; then
+                missing+=("Visual Studio Build Tools + CMake (winget install Microsoft.VisualStudio.2022.BuildTools; winget install Kitware.CMake)")
+            fi
+            ;;
+    esac
+    if [ ${#missing[@]} -gt 0 ]; then
+        warn "Source install requires compilation tools:"
+        for m in "${missing[@]}"; do
+            echo "  - $m"
+        done
+        return 1
+    fi
+    return 0
+}
+
 reaper_is_running() {
     # Test-only override (see tests/integration/) -- simulates REAPER
     # being open without needing a real REAPER process running.
@@ -99,6 +128,11 @@ quit_reaper_and_wait() {
 }
 
 relaunch_reaper() {
+    # Test-only override -- simulates REAPER relaunch without real process
+    if [ -n "${MIDIGPT_FAKE_REAPER_RUNNING:-}" ]; then
+        info "Test mode: skipping actual REAPER relaunch"
+        return 1
+    fi
     if [ "$PLATFORM" = "macos" ]; then
         open -a REAPER 2>/dev/null
     elif check_cmd reaper; then
@@ -115,10 +149,13 @@ open_url() {
     local url="$1"
     if [ "$PLATFORM" = "macos" ]; then
         open "$url" 2>/dev/null
+        return $?
     elif [ "$PLATFORM" = "windows" ]; then
         cmd.exe /c start "" "$url" 2>/dev/null
+        return $?
     else
         xdg-open "$url" 2>/dev/null
+        return $?
     fi
 }
 
@@ -169,12 +206,16 @@ download_arachno_soundfont() {
 # ── Args ────────────────────────────────────────────────────────
 
 REAPER_ONLY=false
+TORCH_GPU=false
+DEV_MODE=false
 
 for arg in "$@"; do
     case "$arg" in
         --skip-deps) SKIP_DEPS=true ;;
         --skip-reaper-config) SKIP_REAPER_CONFIG=true ;;
         --reaper-only) REAPER_ONLY=true ;;
+        --torch-gpu) TORCH_GPU=true ;;
+        --dev) DEV_MODE=true ;;
         --midigpt-src=*)
             MIDIGPT_SRC="${arg#*=}"
             ;;
@@ -189,11 +230,16 @@ for arg in "$@"; do
             echo "  --reaper-only        Only do REAPER integration (Step 4/5: symlinks, ReaPack,"
             echo "                       ReaImGui, reaper.ini) -- skips venv/backend entirely."
             echo "                       Useful to redo just the REAPER side, or for testing."
+            echo "  --torch-gpu          Install PyTorch with GPU support (CUDA on Linux/Windows,"
+            echo "                       MPS on macOS is included in default wheel)."
+            echo "  --dev                Install plugin in editable mode (-e) for development."
             echo "  --midigpt-src=PATH   Path to the MIDI-GPT source repository (sibling folder by default)"
             echo "  --help               Show this help"
             echo ""
             echo "Examples:"
-            echo "  ./install.sh                                   # Full installation"
+            echo "  ./install.sh                                   # Full installation (CPU torch)"
+            echo "  ./install.sh --torch-gpu                       # Full installation with GPU torch"
+            echo "  ./install.sh --dev                             # Development install (editable)"
             echo "  ./install.sh --midigpt-src=/custom/path        # Custom MIDI-GPT source path"
             echo "  ./install.sh --reaper-only                     # Just (re)do REAPER integration"
             exit 0
@@ -314,8 +360,10 @@ if [ "$SKIP_DEPS" = false ]; then
         if [[ " ${MISSING[*]} " == *"curl"* ]]; then
             if [ "$PLATFORM" = "linux" ]; then
                 fail "Please install curl (e.g. sudo apt install curl, or ask your cluster admin / try 'module load curl') then re-run"
+            elif [ "$PLATFORM" = "macos" ]; then
+                fail "Please install curl (e.g. brew install curl) then re-run"
             else
-                fail "Please install curl then re-run"
+                fail "Please install curl (e.g. winget install curl.curl or choco install curl) then re-run"
             fi
         fi
 
@@ -396,8 +444,19 @@ if python -c "import torch" 2>/dev/null; then
 else
     info "Installing PyTorch (this may take a few minutes)..."
     if [ "$PLATFORM" = "linux" ]; then
-        pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+        if [ "$TORCH_GPU" = true ]; then
+            pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+        else
+            pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+        fi
+    elif [ "$PLATFORM" = "windows" ]; then
+        if [ "$TORCH_GPU" = true ]; then
+            pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+        else
+            pip install torch
+        fi
     else
+        # macOS: default wheel includes MPS support for Apple Silicon
         pip install torch
     fi
     if python -c "import torch" 2>/dev/null; then
@@ -412,8 +471,10 @@ else
         echo ""
         echo "  1. Visit: https://pytorch.org/get-started/locally/"
         echo "  2. Select your OS, package manager (pip), and Python version"
-        echo "  3. Run the install command it gives you (with this venv activated)"
-        echo "  4. Then re-run this installer"
+        echo "  3. Run the install command it gives you WITH THIS VENV ACTIVATED:"
+        echo "       source $VENV_DIR/bin/activate"
+        echo "       pip install <command-from-pytorch-org>"
+        echo "  4. Then re-run this installer (it will detect existing torch)"
         echo ""
         fail "PyTorch installation failed. See instructions above."
     fi
@@ -429,6 +490,7 @@ step "Step 3/6: Installing MIDI-GPT backend"
 
 if [ -n "$MIDIGPT_SRC" ] && [ -d "$MIDIGPT_SRC" ]; then
     info "Installing midigpt[http,inference] from source: $MIDIGPT_SRC ..."
+    check_build_tools || fail "Missing build tools required for source install"
     pip install -e "${MIDIGPT_SRC}[http,inference]" 2>&1 | tail -5
 else
     info "Installing midigpt[http,inference] from PyPI ..."
@@ -453,8 +515,13 @@ else
 fi
 
 info "Installing plugin dependencies..."
-pip install -e "$REPO_DIR" -q 2>/dev/null || pip install -e "$REPO_DIR"
-ok "Plugin dependencies installed"
+if [ "$DEV_MODE" = true ]; then
+    pip install -e "$REPO_DIR" -q 2>/dev/null || pip install -e "$REPO_DIR"
+    ok "Plugin dependencies installed (editable mode)"
+else
+    pip install "$REPO_DIR" -q 2>/dev/null || pip install "$REPO_DIR"
+    ok "Plugin dependencies installed"
+fi
 
 fi # REAPER_ONLY == false (Steps 1-3)
 
@@ -502,6 +569,8 @@ if [ -d "$REAPER_DIR" ]; then
             fi
         else
             warn "REAPER is currently running -- ReaPack install and reaper.ini setup will be skipped (non-interactive)."
+            echo "  Close REAPER, then re-run this installer:"
+            echo "    ./install.sh"
         fi
     fi
 
@@ -627,6 +696,7 @@ if not reaper.APIExists("ImGui_CreateContext") then
 end
 LUA_EOF
 
+            IMGUI_BOOTSTRAP_WRITTEN=false
             if grep -qF -- "$BEGIN_MARK" "$STARTUP_LUA"; then
                 awk -v b="$BEGIN_MARK" -v e="$END_MARK" -v blockfile="$BLOCK_TMP" '
                     BEGIN { block = ""; while ((getline line < blockfile) > 0) block = block line "\n" }
@@ -635,6 +705,7 @@ LUA_EOF
                     skip { next }
                     { print }
                 ' "$STARTUP_LUA" > "${STARTUP_LUA}.tmp" && mv "${STARTUP_LUA}.tmp" "$STARTUP_LUA"
+                IMGUI_BOOTSTRAP_WRITTEN=true
             else
                 {
                     echo ""
@@ -642,6 +713,7 @@ LUA_EOF
                     cat "$BLOCK_TMP"
                     echo "$END_MARK"
                 } >> "$STARTUP_LUA"
+                IMGUI_BOOTSTRAP_WRITTEN=true
             fi
             rm -f "$BLOCK_TMP"
             ok "ReaImGui will install automatically the next time REAPER starts"
@@ -653,6 +725,9 @@ LUA_EOF
     fi
 else
     warn "REAPER config directory not found — REAPER may not be installed yet"
+    echo "  Install REAPER: https://www.reaper.fm/download.php"
+    echo "  Launch REAPER once, quit it, then re-run this installer:"
+    echo "    ./install.sh"
 fi
 
 # ====================================================================
@@ -760,18 +835,55 @@ else
         echo "  Launch REAPER once, quit it, then re-run this installer to auto-configure."
     else
         warn "REAPER config directory not found — REAPER may not be installed"
+        echo "  Install REAPER: https://www.reaper.fm/download.php"
+        echo "  Launch REAPER once, quit it, then re-run this installer:"
+        echo "    ./install.sh"
     fi
     if [ -n "$PYTHON_DLL_PATH" ]; then
-        echo "  When ready, set the Python library path to:"
-        echo -e "    ${GREEN}$PYTHON_DLL_PATH${NC}"
+        echo ""
+        echo "  Manual REAPER configuration required:"
+        echo "  1. Open REAPER"
+        echo "  2. Options > Preferences > Plug-Ins > ReaScript"
+        echo "  3. Enable 'ReaScript' (checkbox)"
+        echo "  4. Set 'Python library' to:"
+        echo -e "       ${GREEN}$PYTHON_DLL_PATH${NC}"
+        echo "  5. Click OK, then RESTART REAPER for changes to take effect."
     fi
 fi
 fi
 
-if [ "$REAPER_WAS_CLOSED_BY_US" = true ]; then
-    info "Reopening REAPER so ReaPack can load and finish setup automatically..."
+# Check if we need to launch REAPER for ImGui install (either we closed it, or
+# ImGui bootstrap was written and REAPER isn't running)
+NEED_REAPER_FOR_IMGUI=false
+if [ "$REAPER_WAS_CLOSED_BY_US" = true ] || [ "${IMGUI_BOOTSTRAP_WRITTEN:-false}" = true ]; then
+    if ! reaper_is_running; then
+        NEED_REAPER_FOR_IMGUI=true
+    fi
+fi
+
+if [ "$NEED_REAPER_FOR_IMGUI" = true ]; then
+    info "Launching REAPER to install ReaImGui via ReaPack..."
     if relaunch_reaper; then
-        ok "REAPER relaunched -- ReaImGui installs in the background over the next minute or two."
+        ok "REAPER launched -- waiting for ReaImGui to install (up to 120s)..."
+        # Poll for ImGui binary in UserPlugins
+        waited=0
+        imgui_found=false
+        while [ "$waited" -lt 120 ]; do
+            if find "$REAPER_DIR/UserPlugins" -iname "*imgui*" 2>/dev/null | grep -q .; then
+                imgui_found=true
+                break
+            fi
+            sleep 5
+            waited=$((waited + 5))
+        done
+        if [ "$imgui_found" = true ]; then
+            ok "ReaImGui installed successfully"
+        else
+            warn "ReaImGui not detected yet (may still be installing in background)"
+        fi
+        # Close REAPER gracefully so user starts fresh
+        quit_reaper_and_wait
+        info "REAPER closed. Setup complete — start REAPER when ready to use MIDI-GPT."
     fi
 fi
 
@@ -910,8 +1022,12 @@ if [ -t 0 ]; then
     echo "  you rather than running an installer on your behalf."
     read -rp "  Open the Sforzando download page in your browser now? [y/N]: " _OPEN_SFZ
     if [[ "$_OPEN_SFZ" =~ ^[Yy]$ ]]; then
-        open_url "https://www.plogue.com/products/sforzando.html"
-        ok "Opened the Sforzando download page"
+        if open_url "https://www.plogue.com/products/sforzando.html"; then
+            ok "Opened the Sforzando download page"
+        else
+            warn "Could not open browser automatically"
+            echo "  Visit manually: https://www.plogue.com/products/sforzando.html"
+        fi
     fi
     echo ""
     echo "  Arachno is just a SoundFont data file, so this installer can fetch"
