@@ -1,4 +1,4 @@
-# ============================================================================
+﻿# ============================================================================
 # MIDI-GPT for REAPER — Windows Installer (PowerShell)
 #
 # Installs everything needed to run MIDI-GPT in REAPER:
