@@ -1,24 +1,24 @@
 name: Test install.sh / install.ps1
 
-# Runs the fast, network-light parts of the installers against real macOS,
-# Linux, and Windows runners: the pure-Python unit tests (tests/*.py) and
-# the REAPER integration state matrix
-# (tests/integration/test_reaper_states.sh / .ps1), which exercises
-# install.sh --reaper-only / install.ps1 -ReaperOnly against disposable
-# fake REAPER directories covering fresh/partial/pre-configured/
-# REAPER-running/re-run starting states -- see those scripts' headers for
-# exactly what they do and don't prove.
+# Runs the installers against real macOS, Linux, and Windows runners:
+#   - the pure-Python unit tests (tests/*.py)
+#   - the REAPER integration state matrix
+#     (tests/integration/test_reaper_states.sh / .ps1), which exercises
+#     install.sh --reaper-only / install.ps1 -ReaperOnly against
+#     disposable fake REAPER directories covering fresh/partial/
+#     pre-configured/REAPER-running/re-run starting states
+#   - the full end-to-end install (tests/integration/test_install.sh /
+#     .ps1): venv creation, PyTorch, the midigpt[http,inference] backend
+#     (from PyPI -- no sibling MIDI-GPT checkout needed here), the REAPER
+#     Scripts junction/symlink, and the unit test suite, all against a
+#     disposable copy of the repo.
+# See those scripts' headers for exactly what each does and doesn't prove.
 #
 # install.ps1's rewrite (ReaPack/ReaImGui/Arachno/checksum parity with
 # install.sh) was authored without a local PowerShell to test against --
-# this workflow's windows-latest job is the first real verification it
+# this workflow's windows-latest jobs are the first real verification it
 # gets, since GitHub's windows-latest runners ship both powershell.exe
 # (5.1, what Install - Windows.bat actually launches) and pwsh (7+).
-#
-# NOT covered here: the full venv/PyTorch/MIDI-GPT-backend install path
-# (tests/integration/test_install.sh covers that for macOS/Linux, but
-# needs a sibling MIDI-GPT checkout; there's no Windows equivalent of that
-# heavier test yet).
 
 on:
   push:
@@ -71,6 +71,39 @@ jobs:
       - name: Run REAPER integration state matrix
         shell: pwsh
         run: .\tests\integration\test_reaper_states.ps1
+
+  full-install-unix:
+    name: Full install (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run full install integration test
+        run: ./tests/integration/test_install.sh
+
+  full-install-windows:
+    name: Full install (windows-latest)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run full install integration test
+        shell: pwsh
+        run: .\tests\integration\test_install.ps1
 
   unit-tests:
     name: Unit tests (${{ matrix.os }})
