@@ -93,6 +93,7 @@ try {
     # directory instead of the real REAPER install, so this test never
     # touches the machine's actual REAPER config either.
     $FakeReaperDir = Join-Path $WorkDir "fake-reaper"
+    New-Item -ItemType Directory -Path $FakeReaperDir -Force | Out-Null
     $env:MIDIGPT_REAPER_DIR = $FakeReaperDir
 
     $InstallPs1 = Join-Path $CloneDir "install.ps1"

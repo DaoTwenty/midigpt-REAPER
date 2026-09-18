@@ -117,6 +117,9 @@ fi
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/midigpt-install-test.XXXXXX")"
 info "Working directory: $WORK_DIR"
 
+# Create fake REAPER dir so install.sh's REAPER integration runs
+mkdir -p "$WORK_DIR/fake-reaper"
+
 # ── Clone midigpt-REAPER ───────────────────────────────────────
 
 info "Copying midigpt-REAPER into temp directory..."
@@ -156,7 +159,6 @@ INSTALL_LOG="$WORK_DIR/install.log"
 # (see install.sh) points the REAPER integration step at a throwaway
 # directory instead of the real REAPER install, so this test never touches
 # the machine's actual REAPER config either.
-export MIDIGPT_SYSTEM_SITE_PACKAGES=true
 export MIDIGPT_REAPER_DIR="$WORK_DIR/fake-reaper"
 if bash "$CLONE_DIR/install.sh" --skip-reaper-config 2>&1 | tee "$INSTALL_LOG"; then
     echo ""
