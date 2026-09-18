@@ -42,7 +42,19 @@ param(
     [switch]$Help
 )
 
-$ErrorActionPreference = "Stop"
+# NOT "Stop" -- Windows PowerShell 5.1 (unlike pwsh 7+) promotes *any*
+# stderr output from a native command (git, pip, python -- all used
+# throughout this script) into a terminating NativeCommandError under
+# "Stop", even when that output is just a warning or an expected failure
+# already handled via $LASTEXITCODE below (confirmed against a real
+# windows-latest run: `python -c "import torch" 2>$null`, whose whole
+# point is to fail silently before PyTorch is installed, still aborted the
+# script here). Every native-command result that actually needs to stop
+# the install already checks $LASTEXITCODE explicitly and calls
+# Write-Fail; every cmdlet call that needs to stop the install (the
+# network downloads) already has its own try/catch, which still catches
+# real terminating exceptions regardless of this preference.
+$ErrorActionPreference = "Continue"
 
 # ── Config ──────────────────────────────────────────────────────
 $RepoDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -377,7 +389,11 @@ if (Test-Path $VenvDir) {
     Write-Info "Creating venv with $PythonCmd..."
     & $PythonCmd -m venv $VenvDir
     & "$VenvDir\Scripts\Activate.ps1"
-    pip install --upgrade pip setuptools wheel -q
+    # `python -m pip install --upgrade pip`, not `pip install --upgrade
+    # pip` -- Windows refuses to let pip.exe overwrite itself while it's
+    # the running executable ("To modify pip, please run the following
+    # command: ... -m pip install --upgrade pip").
+    python -m pip install --upgrade pip setuptools wheel -q
     Write-OK "Created and activated venv at $VenvDir"
 }
 

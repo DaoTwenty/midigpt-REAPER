@@ -114,7 +114,7 @@ if [ -d "$MIDIGPT_SIBLING" ]; then
     HAVE_SIBLING=true
 fi
 
-WORK_DIR="$(mktemp -d "$REPO_DIR/tmp/midigpt-install-test.XXXXXX")"
+WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/midigpt-install-test.XXXXXX")"
 info "Working directory: $WORK_DIR"
 
 # ── Clone midigpt-REAPER ───────────────────────────────────────

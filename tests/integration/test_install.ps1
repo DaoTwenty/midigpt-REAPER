@@ -24,7 +24,12 @@ param(
     [switch]$Keep
 )
 
-$ErrorActionPreference = "Stop"
+# NOT "Stop" -- see install.ps1's own $ErrorActionPreference comment.
+# This script shells out to robocopy/powershell.exe/python/pip/pytest too,
+# and Windows PowerShell 5.1 promotes any of their stderr output into a
+# terminating error under "Stop". Every failure this script cares about is
+# already checked explicitly via $LASTEXITCODE or wrapped in try/finally.
+$ErrorActionPreference = "Continue"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoDir = Resolve-Path (Join-Path $ScriptDir "..\..")
