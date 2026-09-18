@@ -80,7 +80,13 @@ function Invoke-Install {
     $env:MIDIGPT_FAKE_REAPER_RUNNING = $FakeRunning
     $LogPath = Join-Path $WorkDir "last_run.log"
     & powershell.exe -ExecutionPolicy Bypass -File $InstallPs1 -ReaperOnly *> $LogPath
-    return $LASTEXITCODE
+    $ExitCode = $LASTEXITCODE
+    if ($ExitCode -ne 0) {
+        Write-Host "  [install.ps1 exited $ExitCode -- log follows]" -ForegroundColor Magenta
+        Get-Content $LogPath | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
+        Write-Host "  [end log]" -ForegroundColor Magenta
+    }
+    return $ExitCode
 }
 
 Write-Host ""

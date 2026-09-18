@@ -554,7 +554,11 @@ if [ -d "$REAPER_DIR" ]; then
             # Certificates.command") would otherwise fail here silently.
             # python is only used to parse the already-fetched JSON text.
             REAPACK_EXPECTED_SHA=""
-            REAPACK_RELEASE_JSON="$(curl -fsSL "https://api.github.com/repos/cfillion/reapack/releases/latest" 2>/dev/null)"
+            # `|| true` -- a network hiccup or GitHub API rate-limit here must
+            # not abort the whole install under `set -e`; the checksum is a
+            # nice-to-have (handled as "installing unverified" below), not a
+            # hard requirement.
+            REAPACK_RELEASE_JSON="$(curl -fsSL "https://api.github.com/repos/cfillion/reapack/releases/latest" 2>/dev/null || true)"
             if [ -n "$REAPACK_RELEASE_JSON" ] && check_cmd python3; then
                 REAPACK_EXPECTED_SHA="$(printf '%s' "$REAPACK_RELEASE_JSON" | python3 -c "
 import json, sys
@@ -771,6 +775,11 @@ if [ "$REAPER_WAS_CLOSED_BY_US" = true ]; then
     fi
 fi
 
+# Referenced unconditionally in the final summary below, so this must be
+# defined even under --reaper-only (which skips the block that would
+# otherwise set it).
+DESKTOP_SHORTCUT_CREATED=false
+
 if [ "$REAPER_ONLY" = false ]; then
 # ====================================================================
 # Step 6: Verify Backend Installation
@@ -794,26 +803,47 @@ if [ -d "$DESKTOP_DIR" ]; then
         LAUNCHER="$REPO_DIR/Start Server - Mac.command"
         SHORTCUT="$DESKTOP_DIR/Start MIDI-GPT Server.command"
         if [ -f "$LAUNCHER" ]; then
-            cat > "$SHORTCUT" << 'LAUNCHER_EOF'
-#!/usr/bin/env bash
-LAUNCHER_EOF
-            echo "cd \"$(printf '%s' "$REPO_DIR")\" && bash \"./start_midigpt_server.sh\"" >> "$SHORTCUT"
-            chmod +x "$SHORTCUT"
-            ok "Desktop shortcut created: Start MIDI-GPT Server.command"
+            # ~/Desktop can be blocked by macOS's Full Disk Access / TCC
+            # restrictions for processes without an interactive GUI
+            # session (e.g. a script run over SSH) -- this is purely a
+            # convenience shortcut, so a failure here must never take down
+            # an otherwise-successful install (set -e would otherwise
+            # abort the whole script on the redirection failing).
+            SHORTCUT_OK=true
+            printf '#!/usr/bin/env bash\ncd "%s" && bash "./start_midigpt_server.sh"\n' "$REPO_DIR" > "$SHORTCUT" 2>/dev/null || SHORTCUT_OK=false
+            if [ "$SHORTCUT_OK" = true ]; then
+                chmod +x "$SHORTCUT" 2>/dev/null || SHORTCUT_OK=false
+            fi
+            if [ "$SHORTCUT_OK" = true ]; then
+                ok "Desktop shortcut created: Start MIDI-GPT Server.command"
+                DESKTOP_SHORTCUT_CREATED=true
+            else
+                warn "Couldn't create Desktop shortcut (permission denied -- this can happen when running non-interactively, e.g. over SSH, without Full Disk Access)"
+                echo "  Start the server manually: cd $REPO_DIR && ./start_midigpt_server.sh"
+            fi
         fi
     elif [ "$PLATFORM" = "linux" ]; then
         SHORTCUT="$DESKTOP_DIR/Start MIDI-GPT Server.desktop"
-        cat > "$SHORTCUT" << DESKTOP_EOF
-[Desktop Entry]
-Type=Application
-Name=Start MIDI-GPT Server
-Exec=bash -c 'cd "$REPO_DIR" && bash ./start_midigpt_server.sh'
-Terminal=true
-Icon=utilities-terminal
-Comment=Start the MIDI-GPT inference server for REAPER
-DESKTOP_EOF
-        chmod +x "$SHORTCUT"
-        ok "Desktop shortcut created: Start MIDI-GPT Server.desktop"
+        SHORTCUT_OK=true
+        {
+            echo "[Desktop Entry]"
+            echo "Type=Application"
+            echo "Name=Start MIDI-GPT Server"
+            echo "Exec=bash -c 'cd \"$REPO_DIR\" && bash ./start_midigpt_server.sh'"
+            echo "Terminal=true"
+            echo "Icon=utilities-terminal"
+            echo "Comment=Start the MIDI-GPT inference server for REAPER"
+        } > "$SHORTCUT" 2>/dev/null || SHORTCUT_OK=false
+        if [ "$SHORTCUT_OK" = true ]; then
+            chmod +x "$SHORTCUT" 2>/dev/null || SHORTCUT_OK=false
+        fi
+        if [ "$SHORTCUT_OK" = true ]; then
+            ok "Desktop shortcut created: Start MIDI-GPT Server.desktop"
+            DESKTOP_SHORTCUT_CREATED=true
+        else
+            warn "Couldn't create Desktop shortcut (permission denied)"
+            echo "  Start the server manually: cd $REPO_DIR && ./start_midigpt_server.sh"
+        fi
     fi
 else
     info "No Desktop folder found — skipping shortcut creation"
@@ -849,7 +879,7 @@ echo "  'MIDI-GPT: Set server address' action and enter its IP/domain and port"
 echo "  (e.g. http://192.168.1.20:3456). Defaults to http://127.0.0.1:3456."
 echo ""
 echo -e "${BOLD}To start the server:${NC}"
-if [ -d "$HOME/Desktop" ]; then
+if [ "$DESKTOP_SHORTCUT_CREATED" = true ]; then
     echo -e "  Double-click ${GREEN}Start MIDI-GPT Server${NC} on your Desktop"
 elif [ "$PLATFORM" = "macos" ]; then
     echo -e "  Double-click: ${GREEN}Start Server - Mac.command${NC}"

@@ -318,8 +318,11 @@ for shortcut in \
 do
     if [ -f "$shortcut" ]; then
         if confirm "Remove '$shortcut'?"; then
-            rm -f "$shortcut"
-            ok "Removed $shortcut"
+            if rm -f "$shortcut" 2>/dev/null; then
+                ok "Removed $shortcut"
+            else
+                warn "Couldn't remove $shortcut (permission denied -- on macOS this can mean the process running this script needs Full Disk Access for ~/Desktop) -- remove it manually"
+            fi
         fi
     fi
 done
