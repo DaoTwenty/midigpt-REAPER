@@ -769,45 +769,11 @@ except Exception:
         if download_reaimgui "$PLATFORM:$ARCH" "$REAPER_DIR/UserPlugins"; then
             REAPACK_READY=true
         else
-            warn "Direct ReaImGui download failed — falling back to ReaPack bootstrap"
+            warn "Direct ReaImGui download failed"
             if [ "$REAPACK_READY" = true ]; then
-                info "Queuing ReaImGui install for the next REAPER launch via ReaPack..."
-                STARTUP_LUA="$REAPER_DIR/Scripts/__startup.lua"
-                BEGIN_MARK="-- BEGIN MIDI-GPT ReaImGui bootstrap (safe to delete this block)"
-                END_MARK="-- END MIDI-GPT ReaImGui bootstrap"
-                mkdir -p "$(dirname "$STARTUP_LUA")"
-                touch "$STARTUP_LUA"
-
-                BLOCK_TMP="$(mktemp)"
-                cat > "$BLOCK_TMP" << 'LUA_EOF'
-if not reaper.APIExists("ImGui_CreateContext") then
-  reaper.ReaPack_AddSetRepository("ReaTeam Extensions", "https://github.com/ReaTeam/Extensions/raw/master/index.xml", true, 1)
-  reaper.ReaPack_ProcessQueue(true)
-end
-LUA_EOF
-
-                IMGUI_BOOTSTRAP_WRITTEN=false
-                if grep -qF -- "$BEGIN_MARK" "$STARTUP_LUA"; then
-                    awk -v b="$BEGIN_MARK" -v e="$END_MARK" -v blockfile="$BLOCK_TMP" '
-                        BEGIN { block = ""; while ((getline line < blockfile) > 0) block = block line "\n" }
-                        $0 == b { print; printf "%s", block; skip=1; next }
-                        $0 == e { print; skip=0; next }
-                        skip { next }
-                        { print }
-                    ' "$STARTUP_LUA" > "${STARTUP_LUA}.tmp" && mv "${STARTUP_LUA}.tmp" "$STARTUP_LUA"
-                    IMGUI_BOOTSTRAP_WRITTEN=true
-                else
-                    {
-                        echo ""
-                        echo "$BEGIN_MARK"
-                        cat "$BLOCK_TMP"
-                        echo "$END_MARK"
-                    } >> "$STARTUP_LUA"
-                    IMGUI_BOOTSTRAP_WRITTEN=true
-                fi
-                rm -f "$BLOCK_TMP"
-                warn "ReaImGui will install automatically the next time REAPER starts (via ReaPack)"
-                warn "This also installs the other packages in the 'ReaTeam Extensions' repo (ReaBlink, ReaMCULive, js_ReaScriptAPI) -- all official ReaTeam-curated extensions, not just ReaImGui, since ReaPack can only auto-install per-repository, not per-package."
+                warn "ReaImGui not installed — manual installation required:"
+                echo "  In REAPER: Extensions > ReaPack > Browse packages > search 'ReaImGui' > install > restart REAPER"
+                echo "  This also installs the other packages in the 'ReaTeam Extensions' repo (ReaBlink, ReaMCULive, js_ReaScriptAPI)"
             else
                 warn "ReaImGui extension not found — the dashboard UI needs it"
                 echo "  In REAPER: Extensions > ReaPack > Browse packages > search 'ReaImGui' > install > restart REAPER"
@@ -945,43 +911,18 @@ fi
 
 # Check if we need to launch REAPER:
 # 1. We closed REAPER ourselves (for ReaPack/reaper.ini changes)
-# 2. We used the ReaImGui bootstrap fallback (needs REAPER to run ReaPack)
 # If direct ReaImGui download succeeded, no relaunch needed for ImGui.
 NEED_REAPER_RELAUNCH=false
-if [ "$REAPER_WAS_CLOSED_BY_US" = true ] || [ "${IMGUI_BOOTSTRAP_WRITTEN:-false}" = true ]; then
+if [ "$REAPER_WAS_CLOSED_BY_US" = true ]; then
     if ! reaper_is_running; then
         NEED_REAPER_RELAUNCH=true
     fi
 fi
 
 if [ "$NEED_REAPER_RELAUNCH" = true ]; then
-    if [ "${IMGUI_BOOTSTRAP_WRITTEN:-false}" = true ]; then
-        info "Launching REAPER to install ReaImGui via ReaPack..."
-    else
-        info "Relaunching REAPER so ReaPack can load..."
-    fi
+    info "Relaunching REAPER so ReaPack can load..."
     if relaunch_reaper; then
-        if [ "${IMGUI_BOOTSTRAP_WRITTEN:-false}" = true ]; then
-            ok "REAPER launched -- waiting for ReaImGui to install (up to 120s)..."
-            # Poll for ImGui binary in UserPlugins
-            waited=0
-            imgui_found=false
-            while [ "$waited" -lt 120 ]; do
-                if find "$REAPER_DIR/UserPlugins" -iname "*imgui*" 2>/dev/null | grep -q .; then
-                    imgui_found=true
-                    break
-                fi
-                sleep 5
-                waited=$((waited + 5))
-            done
-            if [ "$imgui_found" = true ]; then
-                ok "ReaImGui installed successfully"
-            else
-                warn "ReaImGui not detected yet (may still be installing in background)"
-            fi
-        else
-            ok "REAPER relaunched -- ReaPack loaded"
-        fi
+        ok "REAPER relaunched -- ReaPack loaded"
         # Close REAPER gracefully so user starts fresh
         quit_reaper_and_wait
         info "REAPER closed. Setup complete — start REAPER when ready to use MIDI-GPT."

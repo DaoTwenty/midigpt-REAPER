@@ -1,15 +1,14 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Test script for ReaImGui bootstrap mechanism (full flow)
+# Test script for ReaImGui direct download mechanism
 #
 # Tests the complete mechanism:
-#   1. Bootstrap written to __startup.lua
-#   2. ReaPack installed
-#   3. REAPER "launched" (test mode) for ImGui install
-#   4. Polling detects ImGui in UserPlugins
-#   5. REAPER "closed" gracefully
+#   1. ReaPack installed
+#   2. ReaImGui downloaded directly from codeberg.org
+#   3. ReaImGui binary placed in UserPlugins
+#   4. No REAPER relaunch needed (direct download)
+#   5. Idempotent: second run skips ImGui if already present
 #
-# Uses MIDIGPT_FAKE_REAPER_RUNNING to simulate REAPER process lifecycle.
 # Usage:
 #   ./tests/integration/test_reaimgui_bootstrap.sh
 #   ./tests/integration/test_reaimgui_bootstrap.sh --keep   # Keep temp dir
@@ -61,7 +60,7 @@ for arg in "$@"; do
 done
 
 echo ""
-echo -e "${BOLD}━━━ ReaImGui Bootstrap Full Mechanism Test ━━━${NC}"
+echo -e "${BOLD}━━━ ReaImGui Direct Download Test ━━━${NC}"
 echo ""
 
 # ── Setup: Create fake REAPER directory structure ──
@@ -74,12 +73,13 @@ find "$FAKE_REAPER/UserPlugins" -iname "*imgui*" -delete 2>/dev/null || true
 
 info "Fake REAPER dir: $FAKE_REAPER"
 
-# ── Run install.sh --reaper-only with FAKE REAPER RUNNING ──
-# This simulates: REAPER not running initially, installer writes bootstrap,
-# then launches REAPER (test mode), polls for ImGui, then closes REAPER.
-scenario "Running install.sh --reaper-only (full ImGui mechanism)"
+# ── Run install.sh --reaper-only ──
+# This tests the direct download mechanism:
+# - ReaPack installed
+# - ReaImGui downloaded directly from codeberg.org
+# - No REAPER relaunch needed
+scenario "Running install.sh --reaper-only (direct ReaImGui download)"
 
-# First run: REAPER not running, should write bootstrap + launch REAPER
 MIDIGPT_REAPER_DIR="$FAKE_REAPER" \
 MIDIGPT_FAKE_REAPER_RUNNING=false \
 bash "$INSTALL_SH" --reaper-only --skip-reaper-config < /dev/null > "$WORK_DIR/install.log" 2>&1
@@ -94,23 +94,7 @@ else
     exit 1
 fi
 
-# ── Verify __startup.lua has bootstrap block ──
-STARTUP_LUA="$FAKE_REAPER/Scripts/__startup.lua"
-scenario "Verifying __startup.lua bootstrap block"
-
-if [ -f "$STARTUP_LUA" ]; then
-    pass "__startup.lua created"
-    if grep -q "BEGIN MIDI-GPT ReaImGui bootstrap" "$STARTUP_LUA"; then
-        pass "Bootstrap block found in __startup.lua"
-    else
-        fail_test "Bootstrap block NOT found in __startup.lua"
-        cat "$STARTUP_LUA"
-    fi
-else
-    fail_test "__startup.lua NOT created"
-fi
-
-# ── Verify ReaPack was installed (required for bootstrap to work) ──
+# ── Verify ReaPack was installed ──
 scenario "Verifying ReaPack installation"
 
 if find "$FAKE_REAPER/UserPlugins" -iname "reaper_reapack*" | grep -q .; then
@@ -120,46 +104,50 @@ else
     fail_test "ReaPack binary NOT found in UserPlugins"
 fi
 
-# ── Verify REAPER relaunch + poll mechanism was triggered ──
-scenario "Verifying REAPER relaunch + poll mechanism triggered"
+# ── Verify ReaImGui was downloaded directly ──
+scenario "Verifying ReaImGui direct download"
 
-if grep -q "Launching REAPER to install ReaImGui via ReaPack" "$WORK_DIR/install.log"; then
-    pass "Installer entered REAPER relaunch branch for ImGui"
+if find "$FAKE_REAPER/UserPlugins" -iname "*imgui*" | grep -q .; then
+    IMGUI_FILE=$(find "$FAKE_REAPER/UserPlugins" -iname "*imgui*" | head -1)
+    pass "ReaImGui binary found: $(basename "$IMGUI_FILE")"
 else
-    fail_test "Installer did NOT enter REAPER relaunch branch"
+    fail_test "ReaImGui binary NOT found in UserPlugins"
+fi
+
+# ── Verify no __startup.lua was created (no bootstrap) ──
+scenario "Verifying no bootstrap (__startup.lua not created)"
+
+if [ ! -f "$FAKE_REAPER/Scripts/__startup.lua" ]; then
+    pass "__startup.lua NOT created (no bootstrap mechanism)"
+else
+    fail_test "__startup.lua was created (old bootstrap still exists)"
+fi
+
+# ── Verify direct download message in log ──
+scenario "Verifying direct download log messages"
+
+if grep -q "Installing ReaImGui" "$WORK_DIR/install.log" && \
+   grep -q "Downloading ReaImGui" "$WORK_DIR/install.log" && \
+   grep -q "ReaImGui installed and checksum-verified" "$WORK_DIR/install.log"; then
+    pass "Direct download log messages found"
+else
+    fail_test "Direct download log messages NOT found"
     cat "$WORK_DIR/install.log"
 fi
 
-if grep -q "waiting for ReaImGui to install" "$WORK_DIR/install.log"; then
-    pass "Installer started polling for ImGui"
+# ── Verify no REAPER relaunch for ImGui ──
+scenario "Verifying no REAPER relaunch for ImGui"
+
+if grep -q "Launching REAPER to install ReaImGui" "$WORK_DIR/install.log"; then
+    fail_test "Installer incorrectly launched REAPER for ImGui"
 else
-    fail_test "Installer did NOT start polling for ImGui"
-    cat "$WORK_DIR/install.log"
+    pass "Installer did NOT launch REAPER for ImGui (direct download used)"
 fi
 
-if grep -q "Test mode: skipping actual REAPER relaunch" "$WORK_DIR/install.log"; then
-    pass "Test mode detected (REAPER relaunch simulated)"
-else
-    fail_test "Test mode not detected in relaunch"
-    cat "$WORK_DIR/install.log"
-fi
+# ── Test idempotency: second run with ImGui already present ──
+scenario "Testing idempotency (ImGui already present)"
 
-if grep -q "REAPER closed. Setup complete" "$WORK_DIR/install.log"; then
-    pass "Installer closed REAPER after ImGui install simulation"
-else
-    fail_test "Installer did NOT close REAPER after ImGui simulation"
-    cat "$WORK_DIR/install.log"
-fi
-
-# ── Simulate ImGui installation during polling (second run) ──
-# The first run polls but finds nothing (test mode). 
-# Second run: simulate that ImGui was installed during the "REAPER session"
-scenario "Simulating ImGui installed during REAPER session (idempotency)"
-
-# Create dummy ImGui binary to simulate successful install
-touch "$FAKE_REAPER/UserPlugins/reaper_imgui.dylib"
-
-# Run again - should detect ImGui already present, skip bootstrap + relaunch
+# Run again - should detect ImGui already present, skip download
 MIDIGPT_REAPER_DIR="$FAKE_REAPER" \
 MIDIGPT_FAKE_REAPER_RUNNING=false \
 bash "$INSTALL_SH" --reaper-only --skip-reaper-config < /dev/null > "$WORK_DIR/install2.log" 2>&1
@@ -173,18 +161,10 @@ else
     cat "$WORK_DIR/install2.log"
 fi
 
-if grep -q "ReaImGui extension not found" "$WORK_DIR/install2.log"; then
+if grep -q "ReaImGui installed" "$WORK_DIR/install2.log"; then
     fail_test "Second run incorrectly tried to install ImGui again"
-    cat "$WORK_DIR/install2.log"
 else
     pass "Second run correctly skipped ImGui install (already present)"
-fi
-
-if grep -q "Launching REAPER to install ReaImGui" "$WORK_DIR/install2.log"; then
-    fail_test "Second run incorrectly launched REAPER again"
-    cat "$WORK_DIR/install2.log"
-else
-    pass "Second run correctly skipped REAPER relaunch"
 fi
 
 # ── Summary ──

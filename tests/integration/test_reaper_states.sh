@@ -141,7 +141,7 @@ run_install "$FAKE" false
 assert_contains "second run detects ReaPack already installed (no re-download)" "$WORK_DIR/last_run.log" \
     "ReaPack already installed"
 # Direct download should detect ImGui already present, no bootstrap needed.
-assert_false "no duplicate ImGui install on re-run" bash -c "grep -q 'ReaImGui installed' '$WORK_DIR/last_run.log' && exit 1 || exit 0"
+assert_false "no duplicate ImGui install on re-run" bash -c "grep -q 'Downloading ReaImGui' '$WORK_DIR/last_run.log' && exit 1 || exit 0"
 assert_line_count "exactly one ReaPack binary present (no duplicate downloads)" 1 \
     find "$FAKE/UserPlugins" -iname "reaper_reapack*"
 

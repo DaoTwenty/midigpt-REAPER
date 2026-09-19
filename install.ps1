@@ -130,8 +130,8 @@ function Invoke-ReaperQuitAndWait {
 function Start-ReaperApp {
     # Test-only override -- simulates REAPER relaunch without real process
     if ($env:MIDIGPT_FAKE_REAPER_RUNNING) {
-        Write-Info "Test mode: skipping actual REAPER relaunch"
-        return $false
+        Write-Info "Test mode: simulating REAPER relaunch"
+        return $true
     }
     $Candidates = @(
         (Join-Path $env:ProgramFiles "REAPER (x64)\reaper.exe"),
