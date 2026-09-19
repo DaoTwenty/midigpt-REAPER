@@ -130,8 +130,8 @@ quit_reaper_and_wait() {
 relaunch_reaper() {
     # Test-only override -- simulates REAPER relaunch without real process
     if [ -n "${MIDIGPT_FAKE_REAPER_RUNNING:-}" ]; then
-        info "Test mode: skipping actual REAPER relaunch"
-        return 1
+        info "Test mode: simulating REAPER relaunch"
+        return 0
     fi
     if [ "$PLATFORM" = "macos" ]; then
         open -a REAPER 2>/dev/null
@@ -201,6 +201,90 @@ download_arachno_soundfont() {
     rm -f "$tmp_zip"
     ok "Arachno SoundFont installed: $dest_file"
     return 0
+}
+
+# Downloads ReaImGui extension directly from codeberg.org (ReaTeam Extensions)
+# Same pattern as ReaPack: direct download + checksum verification.
+# ReaImGui releases: https://codeberg.org/cfillion/reaimgui/releases
+download_reaimgui() {
+    local platform_arch="$1"
+    local dest_dir="$2"
+    local imgui_asset="" imgui_url="" expected_sha="" actual_sha=""
+
+    case "$platform_arch" in
+        macos:arm64|macos:aarch64) imgui_asset="reaper_imgui-arm64.dylib" ;;
+        macos:x86_64)              imgui_asset="reaper_imgui-x86_64.dylib" ;;
+        linux:aarch64|linux:arm64) imgui_asset="reaper_imgui-aarch64.so" ;;
+        linux:x86_64)              imgui_asset="reaper_imgui-x86_64.so" ;;
+        linux:armv7l)              imgui_asset="reaper_imgui-armv7l.so" ;;
+        linux:i686)                imgui_asset="reaper_imgui-i686.so" ;;
+        windows:*)                 imgui_asset="reaper_imgui-x64.dll" ;;
+        *) return 1 ;;
+    esac
+
+    if [ -z "$imgui_asset" ]; then
+        return 1
+    fi
+
+    info "Downloading ReaImGui ($imgui_asset)..."
+    mkdir -p "$dest_dir"
+    local tmp_file
+    tmp_file="$(mktemp)"
+
+    # ReaImGui releases on codeberg.org
+    imgui_url="https://codeberg.org/cfillion/reaimgui/releases/download/v0.10.0.5/$imgui_asset"
+
+    # Fetch expected SHA from codeberg release API (or GitHub mirror)
+    # codeberg API: https://codeberg.org/api/v1/repos/cfillion/reaimgui/releases
+    expected_sha=""
+    if RELEASE_JSON="$(curl -fsSL "https://codeberg.org/api/v1/repos/cfillion/reaimgui/releases" 2>/dev/null || true)"; then
+        if check_cmd python3; then
+            expected_sha="$(printf '%s' "$RELEASE_JSON" | python3 -c "
+import json, sys
+try:
+    data = json.load(sys.stdin)
+    for release in data:
+        if release.get('tag_name') == 'v0.10.0.5':
+            for asset in release.get('assets', []):
+                if asset.get('name') == '$imgui_asset':
+                    print(asset.get('sha256', ''))
+                    break
+            break
+except Exception:
+    pass
+" 2>/dev/null)"
+        fi
+    fi
+
+    if curl -fsSL "$imgui_url" -o "$tmp_file"; then
+        local verified=true
+        if [ -n "$expected_sha" ]; then
+            actual_sha="$( (shasum -a 256 "$tmp_file" 2>/dev/null || sha256sum "$tmp_file" 2>/dev/null) | awk '{print $1}')"
+            if [ "$actual_sha" != "$expected_sha" ]; then
+                verified=false
+                warn "ReaImGui checksum mismatch (expected: $expected_sha, got: $actual_sha)"
+            fi
+        else
+            warn "Could not fetch expected checksum for ReaImGui -- installing unverified"
+        fi
+
+        if [ "$verified" = true ]; then
+            mv "$tmp_file" "$dest_dir/$imgui_asset"
+            if [ "$PLATFORM" = "macos" ]; then
+                xattr -d com.apple.quarantine "$dest_dir/$imgui_asset" 2>/dev/null || true
+            fi
+            ok "ReaImGui installed and checksum-verified ($imgui_asset)"
+            return 0
+        else
+            rm -f "$tmp_file"
+            warn "Downloaded ReaImGui didn't match expected checksum -- discarded"
+            return 1
+        fi
+    else
+        warn "Failed to download ReaImGui from $imgui_url"
+        rm -f "$tmp_file"
+        return 1
+    fi
 }
 
 # ── Args ────────────────────────────────────────────────────────
@@ -680,47 +764,53 @@ except Exception:
     fi
 
     if ! find "$REAPER_DIR/UserPlugins" -iname "*imgui*" 2>/dev/null | grep -q .; then
-        if [ "$REAPACK_READY" = true ]; then
-            info "Queuing ReaImGui install for the next REAPER launch..."
-            STARTUP_LUA="$REAPER_DIR/Scripts/__startup.lua"
-            BEGIN_MARK="-- BEGIN MIDI-GPT ReaImGui bootstrap (safe to delete this block)"
-            END_MARK="-- END MIDI-GPT ReaImGui bootstrap"
-            mkdir -p "$(dirname "$STARTUP_LUA")"
-            touch "$STARTUP_LUA"
+        info "Installing ReaImGui..."
+        if download_reaimgui "$PLATFORM:$ARCH" "$REAPER_DIR/UserPlugins"; then
+            REAPACK_READY=true
+        else
+            warn "Direct ReaImGui download failed — falling back to ReaPack bootstrap"
+            if [ "$REAPACK_READY" = true ]; then
+                info "Queuing ReaImGui install for the next REAPER launch via ReaPack..."
+                STARTUP_LUA="$REAPER_DIR/Scripts/__startup.lua"
+                BEGIN_MARK="-- BEGIN MIDI-GPT ReaImGui bootstrap (safe to delete this block)"
+                END_MARK="-- END MIDI-GPT ReaImGui bootstrap"
+                mkdir -p "$(dirname "$STARTUP_LUA")"
+                touch "$STARTUP_LUA"
 
-            BLOCK_TMP="$(mktemp)"
-            cat > "$BLOCK_TMP" << 'LUA_EOF'
+                BLOCK_TMP="$(mktemp)"
+                cat > "$BLOCK_TMP" << 'LUA_EOF'
 if not reaper.APIExists("ImGui_CreateContext") then
   reaper.ReaPack_AddSetRepository("ReaTeam Extensions", "https://github.com/ReaTeam/Extensions/raw/master/index.xml", true, 1)
   reaper.ReaPack_ProcessQueue(true)
 end
 LUA_EOF
 
-            IMGUI_BOOTSTRAP_WRITTEN=false
-            if grep -qF -- "$BEGIN_MARK" "$STARTUP_LUA"; then
-                awk -v b="$BEGIN_MARK" -v e="$END_MARK" -v blockfile="$BLOCK_TMP" '
-                    BEGIN { block = ""; while ((getline line < blockfile) > 0) block = block line "\n" }
-                    $0 == b { print; printf "%s", block; skip=1; next }
-                    $0 == e { print; skip=0; next }
-                    skip { next }
-                    { print }
-                ' "$STARTUP_LUA" > "${STARTUP_LUA}.tmp" && mv "${STARTUP_LUA}.tmp" "$STARTUP_LUA"
-                IMGUI_BOOTSTRAP_WRITTEN=true
+                IMGUI_BOOTSTRAP_WRITTEN=false
+                if grep -qF -- "$BEGIN_MARK" "$STARTUP_LUA"; then
+                    awk -v b="$BEGIN_MARK" -v e="$END_MARK" -v blockfile="$BLOCK_TMP" '
+                        BEGIN { block = ""; while ((getline line < blockfile) > 0) block = block line "\n" }
+                        $0 == b { print; printf "%s", block; skip=1; next }
+                        $0 == e { print; skip=0; next }
+                        skip { next }
+                        { print }
+                    ' "$STARTUP_LUA" > "${STARTUP_LUA}.tmp" && mv "${STARTUP_LUA}.tmp" "$STARTUP_LUA"
+                    IMGUI_BOOTSTRAP_WRITTEN=true
+                else
+                    {
+                        echo ""
+                        echo "$BEGIN_MARK"
+                        cat "$BLOCK_TMP"
+                        echo "$END_MARK"
+                    } >> "$STARTUP_LUA"
+                    IMGUI_BOOTSTRAP_WRITTEN=true
+                fi
+                rm -f "$BLOCK_TMP"
+                warn "ReaImGui will install automatically the next time REAPER starts (via ReaPack)"
+                warn "This also installs the other packages in the 'ReaTeam Extensions' repo (ReaBlink, ReaMCULive, js_ReaScriptAPI) -- all official ReaTeam-curated extensions, not just ReaImGui, since ReaPack can only auto-install per-repository, not per-package."
             else
-                {
-                    echo ""
-                    echo "$BEGIN_MARK"
-                    cat "$BLOCK_TMP"
-                    echo "$END_MARK"
-                } >> "$STARTUP_LUA"
-                IMGUI_BOOTSTRAP_WRITTEN=true
+                warn "ReaImGui extension not found — the dashboard UI needs it"
+                echo "  In REAPER: Extensions > ReaPack > Browse packages > search 'ReaImGui' > install > restart REAPER"
             fi
-            rm -f "$BLOCK_TMP"
-            ok "ReaImGui will install automatically the next time REAPER starts"
-            warn "This also installs the other packages in the 'ReaTeam Extensions' repo (ReaBlink, ReaMCULive, js_ReaScriptAPI) -- all official ReaTeam-curated extensions, not just ReaImGui, since ReaPack can only auto-install per-repository, not per-package."
-        else
-            warn "ReaImGui extension not found — the dashboard UI needs it"
-            echo "  In REAPER: Extensions > ReaPack > Browse packages > search 'ReaImGui' > install > restart REAPER"
         fi
     fi
 else
@@ -852,34 +942,44 @@ else
 fi
 fi
 
-# Check if we need to launch REAPER for ImGui install (either we closed it, or
-# ImGui bootstrap was written and REAPER isn't running)
-NEED_REAPER_FOR_IMGUI=false
+# Check if we need to launch REAPER:
+# 1. We closed REAPER ourselves (for ReaPack/reaper.ini changes)
+# 2. We used the ReaImGui bootstrap fallback (needs REAPER to run ReaPack)
+# If direct ReaImGui download succeeded, no relaunch needed for ImGui.
+NEED_REAPER_RELAUNCH=false
 if [ "$REAPER_WAS_CLOSED_BY_US" = true ] || [ "${IMGUI_BOOTSTRAP_WRITTEN:-false}" = true ]; then
     if ! reaper_is_running; then
-        NEED_REAPER_FOR_IMGUI=true
+        NEED_REAPER_RELAUNCH=true
     fi
 fi
 
-if [ "$NEED_REAPER_FOR_IMGUI" = true ]; then
-    info "Launching REAPER to install ReaImGui via ReaPack..."
+if [ "$NEED_REAPER_RELAUNCH" = true ]; then
+    if [ "${IMGUI_BOOTSTRAP_WRITTEN:-false}" = true ]; then
+        info "Launching REAPER to install ReaImGui via ReaPack..."
+    else
+        info "Relaunching REAPER so ReaPack can load..."
+    fi
     if relaunch_reaper; then
-        ok "REAPER launched -- waiting for ReaImGui to install (up to 120s)..."
-        # Poll for ImGui binary in UserPlugins
-        waited=0
-        imgui_found=false
-        while [ "$waited" -lt 120 ]; do
-            if find "$REAPER_DIR/UserPlugins" -iname "*imgui*" 2>/dev/null | grep -q .; then
-                imgui_found=true
-                break
+        if [ "${IMGUI_BOOTSTRAP_WRITTEN:-false}" = true ]; then
+            ok "REAPER launched -- waiting for ReaImGui to install (up to 120s)..."
+            # Poll for ImGui binary in UserPlugins
+            waited=0
+            imgui_found=false
+            while [ "$waited" -lt 120 ]; do
+                if find "$REAPER_DIR/UserPlugins" -iname "*imgui*" 2>/dev/null | grep -q .; then
+                    imgui_found=true
+                    break
+                fi
+                sleep 5
+                waited=$((waited + 5))
+            done
+            if [ "$imgui_found" = true ]; then
+                ok "ReaImGui installed successfully"
+            else
+                warn "ReaImGui not detected yet (may still be installing in background)"
             fi
-            sleep 5
-            waited=$((waited + 5))
-        done
-        if [ "$imgui_found" = true ]; then
-            ok "ReaImGui installed successfully"
         else
-            warn "ReaImGui not detected yet (may still be installing in background)"
+            ok "REAPER relaunched -- ReaPack loaded"
         fi
         # Close REAPER gracefully so user starts fresh
         quit_reaper_and_wait
