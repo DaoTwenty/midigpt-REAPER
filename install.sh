@@ -349,7 +349,8 @@ case "$OS" in
     MINGW*|MSYS*) PLATFORM="windows" ;;
     *)            fail "Unsupported OS: $OS. On Windows, use install.ps1 instead." ;;
 esac
-info "Platform: $PLATFORM ($OS)"
+ARCH="$(uname -m)"
+info "Platform: $PLATFORM ($OS) [$ARCH]"
 
 if [ "$REAPER_ONLY" = true ]; then
     step "Skipping system deps / venv / backend (--reaper-only)"

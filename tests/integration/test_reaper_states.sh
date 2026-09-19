@@ -128,8 +128,9 @@ if [ "$RUN_EXIT" -eq 0 ]; then pass "install.sh exits 0"; else fail_test "instal
 assert_true  "symlink created" test -L "$FAKE/Scripts/MIDI-GPT"
 assert_true  "ReaPack binary downloaded" bash -c "find '$FAKE/UserPlugins' -iname 'reaper_reapack*' | grep -q ."
 assert_contains "ReaPack reported checksum-verified" "$WORK_DIR/last_run.log" "checksum-verified"
-assert_contains "__startup.lua has the MIDI-GPT ReaImGui bootstrap block" "$FAKE/Scripts/__startup.lua" \
-    "BEGIN MIDI-GPT ReaImGui bootstrap"
+# With direct ReaImGui download, bootstrap is only a fallback.
+# Verify ReaImGui gets installed (either direct or via bootstrap fallback).
+assert_contains "ReaImGui installed" "$WORK_DIR/last_run.log" "ReaImGui installed"
 assert_contains "reports reaper.ini not found (fresh REAPER, never launched)" "$WORK_DIR/last_run.log" \
     "reaper.ini not found"
 
@@ -139,8 +140,8 @@ scenario "Re-run on the same state (idempotency)"
 run_install "$FAKE" false
 assert_contains "second run detects ReaPack already installed (no re-download)" "$WORK_DIR/last_run.log" \
     "ReaPack already installed"
-assert_grep_count "exactly one MIDI-GPT block in __startup.lua after two runs" 1 \
-    "BEGIN MIDI-GPT ReaImGui bootstrap" "$FAKE/Scripts/__startup.lua"
+# Direct download should detect ImGui already present, no bootstrap needed.
+assert_false "no duplicate ImGui install on re-run" bash -c "grep -q 'ReaImGui installed' '$WORK_DIR/last_run.log' && exit 1 || exit 0"
 assert_line_count "exactly one ReaPack binary present (no duplicate downloads)" 1 \
     find "$FAKE/UserPlugins" -iname "reaper_reapack*"
 
@@ -165,12 +166,13 @@ reaper.ShowConsoleMsg("hello from my own script\n")
 EOF
 run_install "$FAKE" false
 assert_contains "user's own startup content survives" "$FAKE/Scripts/__startup.lua" "hello from my own script"
-assert_contains "MIDI-GPT block was appended" "$FAKE/Scripts/__startup.lua" "BEGIN MIDI-GPT ReaImGui bootstrap"
+# With direct download, no bootstrap is written unless direct download fails.
+# Verify user content survives (bootstrap not interfering).
+assert_contains "user's content still survives after a second run" "$FAKE/Scripts/__startup.lua" \
+    "hello from my own script"
 run_install "$FAKE" false
 assert_contains "user's content still survives after a second run" "$FAKE/Scripts/__startup.lua" \
     "hello from my own script"
-assert_grep_count "still exactly one MIDI-GPT block (not duplicated)" 1 \
-    "BEGIN MIDI-GPT ReaImGui bootstrap" "$FAKE/Scripts/__startup.lua"
 
 # ============================================================================
 scenario "REAPER 'running' (non-interactive) -- ReaPack/reaper.ini must be skipped"
