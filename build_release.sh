@@ -70,7 +70,6 @@ info "Copying midigpt-REAPER source..."
 # ── Installers & launchers (root level) ──
 for f in \
     "install.sh" \
-    "install-windows.sh" \
     "install.ps1" \
     "Install - Mac.command" \
     "Install - Linux.sh" \
@@ -98,7 +97,7 @@ cp "$SCRIPT_DIR/scripts/setup.py" "$RELEASE_DIR/scripts/"
 
 # ── Source: Scripts (REAPER script, extraction) ──
 mkdir -p "$RELEASE_DIR/src/Scripts/MIDI-GPT"
-for f in REAPER_midigpt_infill.py REAPER_midigpt_set_server.py REAPER_midigpt_setup_tracks.py REAPER_midigpt_set_soundfont_template.py REAPER_midigpt_apply_soundfont_template.py REAPER_midigpt_dashboard.py midi_extraction.py; do
+for f in REAPER_midigpt_infill.py REAPER_midigpt_set_server.py REAPER_midigpt_setup_tracks.py REAPER_midigpt_apply_soundfont_template.py REAPER_midigpt_dashboard.py midi_extraction.py; do
     cp "$SCRIPT_DIR/src/Scripts/MIDI-GPT/$f" "$RELEASE_DIR/src/Scripts/MIDI-GPT/$f"
 done
 

@@ -20,6 +20,8 @@ src/Scripts/composers_assistant_v2/models_permuted_labels/
 /.venv
 /.wheel-build-venv/
 /wheelhouse/
+/soundfonts/
+*.sf2
 *.zip
 *.xml
 *.html
@@ -36,3 +38,7 @@ __pycache__/
 /src/MIDIGPT_Reaper.egg-info/
 /src/Scripts/MMM/debug_dumps/
 =2.0
+
+# Local-only PRISM testing convenience (see .prism/config.yaml) -- not a
+# project feature, just how Claude reaches nibi via MFA-aware SSH for tests.
+/.prism/

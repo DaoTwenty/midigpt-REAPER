@@ -42,7 +42,6 @@ import imgui
 # them here doesn't trigger anything on its own.
 import REAPER_midigpt_infill as infill
 import REAPER_midigpt_setup_tracks as setup_tracks
-import REAPER_midigpt_set_soundfont_template as set_soundfont_template
 import REAPER_midigpt_apply_soundfont_template as apply_soundfont_template
 
 # ---------------------------------------------------------------------------
@@ -522,7 +521,6 @@ def reset_all_settings():
 
 ACTIONS = {
     "setup_tracks":            setup_tracks.run_setup_tracks,
-    "set_soundfont_template":  set_soundfont_template.run_set_soundfont_template,
     "apply_soundfont_template": apply_soundfont_template.run_apply_soundfont_template,
     "run_infill":              start_infill,
     "refresh_model":           refresh_model_type,
@@ -604,12 +602,9 @@ def draw_setup_panel():
     if imgui.Button(ctx, "Setup Tracks"):
         clicked = "setup_tracks"
     imgui.SameLine(ctx)
-    if imgui.Button(ctx, "Set SoundFont Template"):
-        clicked = "set_soundfont_template"
-
-    if imgui.Button(ctx, "Apply Template"):
+    if imgui.Button(ctx, "Force Re-setup"):
         clicked = "apply_soundfont_template"
-    imgui.SameLine(ctx)
+
     if imgui.Button(ctx, "Reset Controls"):
         clicked = "reset_all"
 

@@ -66,7 +66,7 @@ The model sees your existing MIDI as context and generates new notes for the bar
 ## Requirements
 
 - **REAPER** 64-bit (v6 or later) — [Download REAPER](https://www.reaper.fm/download.php) (make sure to select the **64-bit** version for your OS)
-- **ReaImGui** — the REAPER extension the dashboard UI is built with. Install it via **Extensions > ReaPack > Browse packages**, search `ReaImGui`, install, then restart REAPER. (Don't have ReaPack? Get it first: [reapack.com](https://reapack.com/).) The installer checks for this and warns you if it's missing.
+- **ReaImGui** — the REAPER extension the dashboard UI is built with. The installer sets this up for you (see [Installation](#installation)); to do it by hand instead: **Extensions > ReaPack > Browse packages**, search `ReaImGui`, install, then restart REAPER. (Don't have ReaPack? Get it first: [reapack.com](https://reapack.com/).)
 - **Python** 3.10 – 3.12 (3.12 recommended) — [Download Python](https://www.python.org/downloads/)
 - **Git** (required for installer package check)
 - **OS:** macOS, Linux, or Windows
@@ -106,11 +106,15 @@ The installer handles everything automatically:
 1. **System dependencies** — Detects `python` and `git`.
 2. **Python virtual environment** — Creates `.venv/` with PyTorch.
 3. **MIDI-GPT backend** — Installs the sibling `MIDI-GPT` library in editable mode.
-4. **REAPER symlinks** — Links the plugin's Scripts into your REAPER config folder, and checks whether the ReaImGui extension (required by the dashboard UI) is already installed, printing instructions if not.
-5. **REAPER configuration** — Edits `reaper.ini` to enable ReaScript and set the Python library path (quit REAPER first).
+4. **REAPER symlinks/junction + ReaPack + ReaImGui** — Links the plugin's Scripts into your REAPER config folder, installs the ReaPack extension directly if it's missing (checksum-verified against GitHub's published digest, since it isn't code-signed — quarantine/Mark-of-the-Web is then cleared only after that check passes), and queues ReaImGui (the dashboard UI's extension) to install automatically the next time REAPER starts, via a small `Scripts/__startup.lua` bootstrap.
+5. **REAPER configuration** — Edits `reaper.ini` to enable ReaScript and set the Python library path.
 6. **Desktop shortcut** — Places a "Start MIDI-GPT Server" launcher on your Desktop.
 
-> **Note:** REAPER should be closed during installation. REAPER overwrites `reaper.ini` when it quits, so any changes made while it's running will be lost.
+> **Note:** Steps 4–5 need REAPER closed — installing ReaPack and editing `reaper.ini` (which REAPER overwrites on quit) both require it. If REAPER is open when you run the installer, it asks permission to close it for you (any unsaved project still prompts to save, same as quitting normally) and reopens it afterward so ReaPack can finish setting up ReaImGui in the background. Decline the prompt and it skips both steps for that run instead.
+>
+> ReaPack has no way to install just one package headlessly — only per-repository. ReaImGui ships in the "ReaTeam Extensions" repo alongside three unrelated, official ReaTeam packages (ReaBlink, ReaMCULive, js_ReaScriptAPI), so the auto-install installs all four.
+
+At the end, the installer also offers [Sforzando and Arachno](VST.md) (opt-in): it opens Sforzando's download page in your browser (a real app installer, so that part's manual), and downloads the Arachno SoundFont directly into this repo's own `soundfonts/` folder, since that one's just a data file. Once both are there, **Setup Tracks** (see [REAPER Setup](#reaper-setup) below) needs no further manual setup — no soundfont import, no per-instrument presets.
 
 ### Install from Source
 
@@ -119,34 +123,37 @@ If you cloned this repo and want to link a local `MIDI-GPT` backend repository:
 ```bash
 # macOS / Linux
 ./install.sh --midigpt-src=/path/to/MIDI-GPT
+```
 
-# Windows (Git Bash / MSYS)
-./install-windows.sh --midigpt-src=/c/path/to/MIDI-GPT
+```powershell
+# Windows
+.\install.ps1 -MidigptSrc C:\path\to\MIDI-GPT
 ```
 
 **Installer flags:**
 
-| Option | Description |
-|--------|-------------|
-| `--midigpt-src=PATH` | Path to the MIDI-GPT backend source folder |
-| `--skip-deps` | Skip system dependency checks |
-| `--skip-reaper-config` | Don't modify `reaper.ini` |
+| `install.sh` | `install.ps1` | Description |
+|--------------|----------------|-------------|
+| `--midigpt-src=PATH` | `-MidigptSrc PATH` | Path to the MIDI-GPT backend source folder |
+| `--skip-deps` | `-SkipDeps` | Skip system dependency checks |
+| `--skip-reaper-config` | `-SkipReaperConfig` | Don't modify `reaper.ini` |
+| `--reaper-only` | `-ReaperOnly` | Only do REAPER integration (symlinks/junction, ReaPack, ReaImGui, `reaper.ini`) — skips the venv/backend entirely. Useful to redo just the REAPER side, or for testing. |
 
 ---
 
 ## REAPER Setup
 
-1. **Install ReaImGui (required, one-time):** **Extensions > ReaPack > Browse packages**, search `ReaImGui`, install, then restart REAPER. The dashboard won't open without it. (Don't have ReaPack? Get it first: [reapack.com](https://reapack.com/).)
+1. **ReaImGui (required, one-time):** the installer already queues this to install automatically the next time REAPER starts (see [Installation](#installation)) — give it a minute after launching REAPER, then check **Extensions > ReaPack > Synchronize packages** if it hasn't shown up. To do it by hand instead: **Extensions > ReaPack > Browse packages**, search `ReaImGui`, install, then restart REAPER. The dashboard won't open without it. (Don't have ReaPack? Get it first: [reapack.com](https://reapack.com/).)
 
 2. **Load the dashboard as a ReaScript action:**
    * Open the Action List: **Actions > Show Action List** (or press `?`).
    * Click **New action**, then select **Load ReaScript...**.
    * Browse to: `~/Library/Application Support/REAPER/Scripts/MIDI-GPT/` (or `%APPDATA%\REAPER\Scripts\MIDI-GPT\` on Windows).
    * Select **`REAPER_midigpt_dashboard.py`** and click Open. This is the only action you need — everything below is a button inside the window it opens.
-   * *(Optional)* The dashboard's buttons are wrappers around `REAPER_midigpt_infill.py`, `REAPER_midigpt_set_server.py`, `REAPER_midigpt_setup_tracks.py`, `REAPER_midigpt_set_soundfont_template.py`, and `REAPER_midigpt_apply_soundfont_template.py`. Load any of those the same way if you want a keyboard shortcut for that one action specifically, without opening the dashboard — REAPER lists each as `Script: <filename>.py` in the Action List. Nothing about the dashboard requires this; it's purely a convenience for people who'd rather bind a hotkey than click a button.
+   * *(Optional)* The dashboard's buttons are wrappers around `REAPER_midigpt_infill.py`, `REAPER_midigpt_set_server.py`, `REAPER_midigpt_setup_tracks.py`, and `REAPER_midigpt_apply_soundfont_template.py`. Load any of those the same way if you want a keyboard shortcut for that one action specifically, without opening the dashboard — REAPER lists each as `Script: <filename>.py` in the Action List. Nothing about the dashboard requires this; it's purely a convenience for people who'd rather bind a hotkey than click a button.
 
 3. **Open the dashboard:** run the action you just loaded. The window has, top to bottom:
-   * **Actions row** — the current server address and a **Change...** button next to it, a model picker (once the server responds), **Setup Tracks**, **Use Selected Track as SoundFont Template**, **Apply Template to Selected Tracks**, **Run Infill**, and **Reset Global Options && Track Controls**.
+   * **Actions row** — the current server address and a **Change...** button next to it, a model picker (once the server responds), **Setup Tracks**, **Force Re-setup Selected Tracks**, **Run Infill**, and **Reset Global Options && Track Controls**.
    * **Global Options** — generation-wide settings (temperature, context size, sampling, etc.) — see [Controls Reference](#controls-reference).
    * **Track Controls** — one collapsible section per track (density, polyphony, duration, key signature, pitch mask, remix, etc.).
    * **Console** — live log output for whatever you just ran (generation progress, errors, the outgoing request for debugging).
@@ -156,11 +163,11 @@ If you cloned this repo and want to link a local `MIDI-GPT` backend repository:
 4. **Point it at your server, if it's not local:** click **Change...** next to "Server:" in the dashboard and enter the address (e.g. `http://192.168.1.20:3456`). Defaults to `http://127.0.0.1:3456`.
 
 5. **Set up tracks (optional, saves manual work):**
-   * Click **Setup Tracks** in the dashboard. It auto-detects each track's GM instrument from its MIDI content and adds a Sforzando instance to any track that doesn't have one yet.
-   * This is specifically for *assigning* a name in the first place, so it reads each track's actual MIDI content (channel 10 / Program Change events) rather than the current track name, since imported files usually give every track the same name to start with. Tracks it can't resolve that way are prompted for individually — a native dropdown list of all 128 GM instruments on macOS, or a keyword-entry dialog (piano/bass/drums/etc.) elsewhere. Resolved tracks are renamed to the matching name from [INSTRUMENTS.md](INSTRUMENTS.md) (e.g. `acoustic_grand_piano`, `drums`) so they're readable at a glance — from then on, generation uses that name as ground truth (see [Set Up Your Session](#2-set-up-your-session)), not the track's MIDI content.
-   * **SoundFont setup (one-time):** the first run adds an empty Sforzando to every track. Manually import your `.sf2` (e.g. Arachno, see [VST.md](VST.md)) into *one* track's Sforzando, select that track, then click **Use Selected Track as SoundFont Template** in the dashboard. From then on, **Setup Tracks** clones that already-loaded instance onto any track that doesn't have an instrument yet — no re-importing the SoundFont per track. To replace tracks that already got an empty Sforzando before the template existed, select them and click **Apply Template to Selected Tracks**.
-   * **Auto-selecting the instrument program (one-time per instrument):** by default you still pick the program inside Sforzando manually (the dashboard's Console tells you which one, e.g. `electric_bass_finger`, per track). To make **Setup Tracks** select it for you, save it as a REAPER FX preset once: with that program showing in Sforzando, open the FX window's **Presets** dropdown → **Save preset...**, and name it `MIDI-GPT: ` + the canonical name (e.g. `MIDI-GPT: electric_bass_finger`) — the `MIDI-GPT: ` prefix keeps these separate from any of your own presets so nothing clashes. Once a preset exists for an instrument, every future track resolved to it gets that program selected automatically — this only needs doing once per instrument you actually use, ever.
-   * Safe to re-run **Setup Tracks**: a track's instrument/preset is only ever touched if it added the instrument itself, and only until its preset selection is confirmed once — after that (or on any instrument you added/changed by hand), re-running leaves it alone. A preset that didn't take effect on one run (still loading) is retried automatically on the next.
+   * Just click **Setup Tracks** in the dashboard. There's no template, no clone-source track, no manual soundfont-import step, and no per-instrument preset to save, ever — every GM instrument's Sforzando+Arachno state is generated on the fly for whichever tracks need one, using the Arachno SoundFont the installer already downloaded (see [Installation](#installation)). If a track needs an instrument Setup Tracks doesn't have yet, it builds one, uses it, and throws it away.
+   * Setup Tracks auto-detects each track's GM instrument from its MIDI content and adds Sforzando+Arachno, already on the correct program, to any track that doesn't have an instrument yet. To force-replace tracks that already have some other (or no) instrument, select them and click **Force Re-setup Selected Tracks**.
+   * Detecting each track's instrument reads its actual MIDI content (channel 10 / Program Change events) rather than the current track name, since imported files usually give every track the same name to start with. Tracks it can't resolve that way are prompted for individually — a native dropdown list of all 128 GM instruments on macOS, or a keyword-entry dialog (piano/bass/drums/etc.) elsewhere. Resolved tracks are renamed to the matching name from [INSTRUMENTS.md](INSTRUMENTS.md) (e.g. `acoustic_grand_piano`, `drums`) so they're readable at a glance — from then on, generation uses that name as ground truth (see [Set Up Your Session](#2-set-up-your-session)), not the track's MIDI content.
+   * Safe to re-run **Setup Tracks**: a track's instrument is only ever touched if it added the instrument itself — on any instrument you added or changed by hand, re-running leaves it alone.
+   * If Setup Tracks can't find the Arachno SoundFont (e.g. you skipped that step during install, or moved the repo), it says so per track instead of guessing — re-run `install.sh` to fetch it, or see [VST.md](VST.md) to place a `.sf2` in this repo's `soundfonts/` folder yourself.
 
 ---
 

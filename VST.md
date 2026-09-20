@@ -1,5 +1,7 @@
 # README — Recommended Instrument Setup (REAPER)
 
+> **Most of this is automated.** `install.sh` can download Arachno directly into this repo's own `soundfonts/` folder (and opens Sforzando's download page for you, since that one's a real app installer it can't run on your behalf) — see the main [README](README.md#installation). Once both are in place, **Setup Tracks** in the dashboard needs no further manual setup: no importing the `.sf2` by hand, no per-instrument presets. The steps below are for doing it by hand instead (e.g. a custom soundfont), or just to understand what Setup Tracks is doing for you.
+
 ---
 
 ## Required Components
@@ -7,7 +9,7 @@
 ### 1. Sforzando (SFZ Player)
 
 Download:
-[https://www.plogue.com/francais/telechargements.html#sforzando](https://www.plogue.com/francais/telechargements.html#sforzando)
+[https://www.plogue.com/products/sforzando.html](https://www.plogue.com/products/sforzando.html)
 
 * Free SFZ sampler plugin (VST/AU)
 * Used to load and play the General MIDI soundfont
@@ -41,7 +43,7 @@ Download:
 
 1. Install **Sforzando**
 2. Install **MT Power Drum Kit 2**
-3. Place the **Arachno `.sf2` file** in a known location (e.g., `Documents/SoundFonts/`)
+3. Place the **Arachno `.sf2` file** in this repo's `soundfonts/` folder (that's where Setup Tracks looks — see the note above) — or anywhere else, if you're only doing the rest of this by hand and don't need Setup Tracks to find it.
 
 ---
 
