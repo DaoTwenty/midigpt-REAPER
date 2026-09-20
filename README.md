@@ -106,13 +106,13 @@ The installer handles everything automatically:
 1. **System dependencies** — Detects `python` and `git`.
 2. **Python virtual environment** — Creates `.venv/` with PyTorch.
 3. **MIDI-GPT backend** — Installs the sibling `MIDI-GPT` library in editable mode.
-4. **REAPER symlinks/junction + ReaPack + ReaImGui** — Links the plugin's Scripts into your REAPER config folder, installs the ReaPack extension directly if it's missing (checksum-verified against GitHub's published digest, since it isn't code-signed — quarantine/Mark-of-the-Web is then cleared only after that check passes), and queues ReaImGui (the dashboard UI's extension) to install automatically the next time REAPER starts, via a small `Scripts/__startup.lua` bootstrap.
+4. **REAPER symlinks/junction + ReaPack + ReaImGui** — Links the plugin's Scripts into your REAPER config folder, installs the ReaPack extension directly if it's missing (checksum-verified against GitHub's published digest, since it isn't code-signed — quarantine/Mark-of-the-Web is then cleared only after that check passes), and downloads ReaImGui (the dashboard UI's extension) directly from codeberg.org (ReaTeam Extensions) with checksum verification. Both installs require REAPER to be closed — the installer asks permission to close it.
 5. **REAPER configuration** — Edits `reaper.ini` to enable ReaScript and set the Python library path.
 6. **Desktop shortcut** — Places a "Start MIDI-GPT Server" launcher on your Desktop.
 
-> **Note:** Steps 4–5 need REAPER closed — installing ReaPack and editing `reaper.ini` (which REAPER overwrites on quit) both require it. If REAPER is open when you run the installer, it asks permission to close it for you (any unsaved project still prompts to save, same as quitting normally) and reopens it afterward so ReaPack can finish setting up ReaImGui in the background. Decline the prompt and it skips both steps for that run instead.
+> **Note:** Steps 4–5 need REAPER closed — installing ReaPack/ReaImGui (direct downloads) and editing `reaper.ini` (which REAPER overwrites on quit) both require it. If REAPER is open when you run the installer, it asks permission to close it for you (any unsaved project still prompts to save, same as quitting normally). After the installs complete, you start REAPER manually.
 >
-> ReaPack has no way to install just one package headlessly — only per-repository. ReaImGui ships in the "ReaTeam Extensions" repo alongside three unrelated, official ReaTeam packages (ReaBlink, ReaMCULive, js_ReaScriptAPI), so the auto-install installs all four.
+> ReaPack has no way to install just one package headlessly — only per-repository. ReaImGui ships in the "ReaTeam Extensions" repo alongside three unrelated, official ReaTeam packages (ReaBlink, ReaMCULive, js_ReaScriptAPI), so installing it brings all four.
 
 At the end, the installer also offers [Sforzando and Arachno](VST.md) (opt-in): it opens Sforzando's download page in your browser (a real app installer, so that part's manual), and downloads the Arachno SoundFont directly into this repo's own `soundfonts/` folder, since that one's just a data file. Once both are there, **Setup Tracks** (see [REAPER Setup](#reaper-setup) below) needs no further manual setup — no soundfont import, no per-instrument presets.
 

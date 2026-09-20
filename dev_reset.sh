@@ -4,9 +4,8 @@
 #
 # Wipes everything install.sh sets up (and a few things it only points at),
 # so you can re-run the installer and test the whole flow from scratch:
-#   - This plugin's REAPER symlink and __startup.lua bootstrap block
-#   - ReaImGui, and the other ReaTeam Extensions packages ReaPack's
-#     auto-install pulls in alongside it (ReaBlink, ReaMCULive,
+#   - This plugin's REAPER symlink
+#   - ReaImGui, and the other ReaTeam Extensions packages (ReaBlink, ReaMCULive,
 #     js_ReaScriptAPI) -- see install.sh's ReaPack/ReaImGui step
 #   - ReaPack itself (extension + its registry/cache)
 #   - The Arachno SoundFont this installer downloads
@@ -136,30 +135,8 @@ else
     info "No MIDI-GPT Scripts symlink found"
 fi
 
-STARTUP_LUA="$REAPER_DIR/Scripts/__startup.lua"
-BEGIN_MARK="-- BEGIN MIDI-GPT ReaImGui bootstrap (safe to delete this block)"
-END_MARK="-- END MIDI-GPT ReaImGui bootstrap"
-if [ -f "$STARTUP_LUA" ] && grep -qF -- "$BEGIN_MARK" "$STARTUP_LUA"; then
-    if confirm "Remove MIDI-GPT's block from Scripts/__startup.lua?"; then
-        awk -v b="$BEGIN_MARK" -v e="$END_MARK" '
-            $0 == b { skip=1; next }
-            $0 == e { skip=0; next }
-            skip { next }
-            { print }
-        ' "$STARTUP_LUA" > "${STARTUP_LUA}.tmp" && mv "${STARTUP_LUA}.tmp" "$STARTUP_LUA"
-        if [ ! -s "$STARTUP_LUA" ] || ! grep -qE '[^[:space:]]' "$STARTUP_LUA"; then
-            rm -f "$STARTUP_LUA"
-            ok "Removed MIDI-GPT's block and deleted __startup.lua (nothing else was in it)"
-        else
-            ok "Removed MIDI-GPT's block from __startup.lua (rest of the file left alone)"
-        fi
-    fi
-else
-    info "No MIDI-GPT block in __startup.lua"
-fi
-
 # ============================================================================
-# ReaImGui + siblings ReaPack's auto-install pulled from ReaTeam Extensions
+# ReaImGui + siblings (ReaBlink / ReaMCULive / js_ReaScriptAPI from ReaTeam Extensions)
 # ============================================================================
 
 step "ReaImGui (and ReaBlink / ReaMCULive / js_ReaScriptAPI from the same repo)"

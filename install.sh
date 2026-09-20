@@ -14,17 +14,16 @@
 # downloaded over HTTPS from its GitHub release and checksum-verified
 # against GitHub's own published digest before use -- it isn't code-signed,
 # so this is the only integrity check available for it). The dashboard
-# UI's ReaImGui extension can only be installed through REAPER's own
-# ReaPack API while REAPER is running, so this installer queues it to
-# install automatically the next time REAPER starts (via a small
-# Scripts/__startup.lua bootstrap) -- if REAPER is currently open, it asks
-# permission to close it first (never force-killed; any unsaved project
-# still prompts to save) so both this and the reaper.ini setup below can
-# run in the same pass, then reopens REAPER for you.
+# UI's ReaImGui extension is also downloaded directly from codeberg.org
+# (ReaTeam Extensions) with checksum verification. Both installs require
+# REAPER to be closed (the installer will ask permission to close it).
 #
 # Usage:
 #   ./install.sh              # Full install
 #   ./install.sh --skip-deps  # Skip system dependency check (if already installed)
+#   ./install.sh --torch-gpu  # Install PyTorch with CUDA/MPS support
+#   ./install.sh --dev        # Editable install for development
+#   ./install.sh --reaper-only  # Only REAPER integration (symlinks, ReaPack, ReaImGui, reaper.ini)
 #   ./install.sh --help       # Show help
 # ============================================================================
 

@@ -146,17 +146,17 @@ assert_line_count "exactly one ReaPack binary present (no duplicate downloads)" 
     find "$FAKE/UserPlugins" -iname "reaper_reapack*"
 
 # ============================================================================
-scenario "ReaImGui already installed -- should not touch __startup.lua"
+scenario "ReaImGui already installed -- no bootstrap created"
 # ============================================================================
 FAKE="$WORK_DIR/s3_has_imgui"
 mkdir -p "$FAKE/UserPlugins"
 touch "$FAKE/UserPlugins/reaper_imgui.dylib"
 run_install "$FAKE" false
-assert_false "no __startup.lua written when ReaImGui already present" test -f "$FAKE/Scripts/__startup.lua"
+assert_false "no __startup.lua written when ReaImGui already present (direct download)" test -f "$FAKE/Scripts/__startup.lua"
 assert_true  "ReaPack still installed independently" bash -c "find '$FAKE/UserPlugins' -iname 'reaper_reapack*' | grep -q ."
 
 # ============================================================================
-scenario "Pre-existing __startup.lua with unrelated user content"
+scenario "Pre-existing __startup.lua with unrelated user content (unchanged)"
 # ============================================================================
 FAKE="$WORK_DIR/s4_user_startup"
 mkdir -p "$FAKE/Scripts"
@@ -166,8 +166,7 @@ reaper.ShowConsoleMsg("hello from my own script\n")
 EOF
 run_install "$FAKE" false
 assert_contains "user's own startup content survives" "$FAKE/Scripts/__startup.lua" "hello from my own script"
-# With direct download, no bootstrap is written unless direct download fails.
-# Verify user content survives (bootstrap not interfering).
+# With direct download, __startup.lua is never touched.
 assert_contains "user's content still survives after a second run" "$FAKE/Scripts/__startup.lua" \
     "hello from my own script"
 run_install "$FAKE" false

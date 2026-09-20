@@ -15,14 +15,10 @@
 # against GitHub's own published digest before use -- it isn't code-signed,
 # so this is the only integrity check available for it; Unblock-File then
 # clears the downloaded-file mark so REAPER can load it without a manual
-# SmartScreen click-through). The dashboard UI's ReaImGui extension can
-# only be installed through REAPER's own ReaPack API while REAPER is
-# running, so this installer queues it to install automatically the next
-# time REAPER starts (via a small Scripts\__startup.lua bootstrap) -- if
-# REAPER is currently open, it asks permission to close it first (never
-# force-killed; any unsaved project still prompts to save) so both this and
-# the reaper.ini setup below can run in the same pass, then reopens REAPER
-# for you.
+# SmartScreen click-through). The dashboard UI's ReaImGui extension is also
+# downloaded directly from codeberg.org (ReaTeam Extensions) with checksum
+# verification. Both installs require REAPER to be closed (the installer
+# will ask permission to close it).
 #
 # Usage:
 #   .\install.ps1                              # Full install
@@ -31,6 +27,8 @@
 #   .\install.ps1 -ReaperOnly                  # Only Step 4/5 (REAPER
 #                                                 integration) -- skips
 #                                                 venv/backend entirely
+#   .\install.ps1 -TorchGpu                    # Install PyTorch with CUDA
+#   .\install.ps1 -Dev                         # Editable install for development
 #   .\install.ps1 -MidigptSrc C:\path\to\MIDI-GPT
 # ============================================================================
 
@@ -160,43 +158,78 @@ function Open-Url {
     }
 }
 
-# Merge the MIDI-GPT ReaImGui bootstrap block into Scripts\__startup.lua,
-# replacing any previous block between the same markers in place (never
-# duplicating it) and preserving anything else already in the file.
-function Set-StartupLuaBlock {
-    param([string]$StartupLuaPath)
+# Downloads ReaImGui extension directly from codeberg.org (ReaTeam Extensions)
+# Same pattern as ReaPack: direct download + checksum verification.
+# ReaImGui releases: https://codeberg.org/cfillion/reaimgui/releases
+function Download-ReaImGui {
+    param(
+        [string]$PlatformArch,
+        [string]$DestDir
+    )
 
-    $BeginMark = "-- BEGIN MIDI-GPT ReaImGui bootstrap (safe to delete this block)"
-    $EndMark = "-- END MIDI-GPT ReaImGui bootstrap"
-    $Block = "if not reaper.APIExists(`"ImGui_CreateContext`") then`n" +
-        "  reaper.ReaPack_AddSetRepository(`"ReaTeam Extensions`", `"https://github.com/ReaTeam/Extensions/raw/master/index.xml`", true, 1)`n" +
-        "  reaper.ReaPack_ProcessQueue(true)`n" +
-        "end"
-    $NewBlockText = "$BeginMark`n$Block`n$EndMark"
-
-    New-Item -ItemType Directory -Path (Split-Path $StartupLuaPath -Parent) -Force | Out-Null
-    $Content = ""
-    if (Test-Path $StartupLuaPath) {
-        $Content = Get-Content -Path $StartupLuaPath -Raw
-        if ($null -eq $Content) { $Content = "" }
+    $ImguiAsset = ""
+    switch ($PlatformArch) {
+        "windows:x64" { $ImguiAsset = "reaper_imgui-x64.dll" }
+        default { return $false }
     }
 
-    $BeginIdx = $Content.IndexOf($BeginMark)
-    if ($BeginIdx -ge 0) {
-        $EndIdx = $Content.IndexOf($EndMark, $BeginIdx)
-        if ($EndIdx -ge 0) {
-            $Before = $Content.Substring(0, $BeginIdx)
-            $After = $Content.Substring($EndIdx + $EndMark.Length)
-            $Content = $Before + $NewBlockText + $After
-        } else {
-            $Content = $Content.TrimEnd() + "`n`n$NewBlockText`n"
+    if ([string]::IsNullOrEmpty($ImguiAsset)) {
+        return $false
+    }
+
+    Write-Info "Downloading ReaImGui ($ImguiAsset)..."
+    New-Item -ItemType Directory -Path $DestDir -Force | Out-Null
+    $TmpFile = Join-Path ([System.IO.Path]::GetTempPath()) "midigpt-imgui-$([System.Guid]::NewGuid()).dll"
+
+    # ReaImGui releases on codeberg.org
+    $ImguiUrl = "https://codeberg.org/cfillion/reaimgui/releases/download/v0.10.0.5/$ImguiAsset"
+
+    # Fetch expected SHA from codeberg release API (or GitHub mirror)
+    # codeberg API: https://codeberg.org/api/v1/repos/cfillion/reaimgui/releases
+    $ExpectedSha = ""
+    try {
+        $ReleaseJson = Invoke-WebRequest -Uri "https://codeberg.org/api/v1/repos/cfillion/reaimgui/releases" -UseBasicParsing -TimeoutSec 10
+        if ($ReleaseJson.StatusCode -eq 200) {
+            $ExpectedSha = ($ReleaseJson.Content | ConvertFrom-Json) |
+                Where-Object { $_.tag_name -eq "v0.10.0.5" } |
+                ForEach-Object {
+                    $_.assets |
+                        Where-Object { $_.name -eq $ImguiAsset } |
+                        ForEach-Object { $_.sha256 }
+                }
         }
-    } else {
-        $Content = $Content.TrimEnd()
-        if ($Content.Length -gt 0) { $Content += "`n`n" }
-        $Content += "$NewBlockText`n"
+    } catch {
+        Write-Warn "Could not fetch expected checksum for ReaImGui -- installing unverified"
     }
-    Set-Content -Path $StartupLuaPath -Value $Content -NoNewline
+
+    try {
+        Invoke-WebRequest -Uri $ImguiUrl -OutFile $TmpFile -UseBasicParsing -TimeoutSec 30
+        $Verified = $true
+        if (-not [string]::IsNullOrEmpty($ExpectedSha)) {
+            $ActualSha = Get-FileHash -Path $TmpFile -Algorithm SHA256 | Select-Object -ExpandProperty Hash
+            if ($ActualSha -ne $ExpectedSha) {
+                $Verified = $false
+                Write-Warn "ReaImGui checksum mismatch (expected: $ExpectedSha, got: $ActualSha)"
+            }
+        } else {
+            Write-Warn "Could not fetch expected checksum for ReaImGui -- installing unverified"
+        }
+
+        if ($Verified) {
+            $DestFile = Join-Path $DestDir $ImguiAsset
+            Move-Item -Path $TmpFile -Destination $DestFile -Force
+            Write-OK "ReaImGui installed and checksum-verified ($ImguiAsset)"
+            return $true
+        } else {
+            Remove-Item $TmpFile -Force -ErrorAction SilentlyContinue
+            Write-Warn "Downloaded ReaImGui didn't match expected checksum -- discarded"
+            return $false
+        }
+    } catch {
+        Write-Warn "Failed to download ReaImGui from $ImguiUrl"
+        Remove-Item $TmpFile -Force -ErrorAction SilentlyContinue
+        return $false
+    }
 }
 
 # Downloads the Arachno GM SoundFont into this repo's own soundfonts\
@@ -642,15 +675,13 @@ if (Test-Path $ReaperDir) {
     if (Test-Path $UserPluginsDir) {
         $HasImgui = Get-ChildItem -Path $UserPluginsDir -Filter "*imgui*" -ErrorAction SilentlyContinue
     }
-    $ImGuiBootstrapWritten = $false
     if (-not $HasImgui) {
-        if ($ReapackReady) {
-            Write-Info "Queuing ReaImGui install for the next REAPER launch..."
-            $StartupLua = Join-Path $ReaperDir "Scripts\__startup.lua"
-            Set-StartupLuaBlock -StartupLuaPath $StartupLua
-            $ImGuiBootstrapWritten = $true
-            Write-OK "ReaImGui will install automatically the next time REAPER starts"
-            Write-Warn "This also installs the other packages in the 'ReaTeam Extensions' repo (ReaBlink, ReaMCULive, js_ReaScriptAPI) -- all official ReaTeam-curated extensions, not just ReaImGui, since ReaPack can only auto-install per-repository, not per-package."
+        if (Download-ReaImGui -PlatformArch $PlatformArch -DestDir $UserPluginsDir) {
+            $ReapackReady = $true
+        } elseif ($ReapackReady) {
+            Write-Warn "ReaImGui not installed - manual installation required:"
+            Write-Host "  In REAPER: Extensions > ReaPack > Browse packages > search 'ReaImGui' > install > restart REAPER"
+            Write-Host "  This also installs the other packages in the 'ReaTeam Extensions' repo (ReaBlink, ReaMCULive, js_ReaScriptAPI)"
         } else {
             Write-Warn "ReaImGui extension not found - the dashboard UI needs it"
             Write-Host "  In REAPER: Extensions > ReaPack > Browse packages > search 'ReaImGui' > install > restart REAPER"

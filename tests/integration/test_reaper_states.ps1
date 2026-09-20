@@ -111,7 +111,8 @@ Assert-True "install.ps1 exits 0" { $ExitCode -eq 0 }
 Assert-True "Scripts junction created" { Test-Path (Join-Path $Fake "Scripts\MIDI-GPT") }
 Assert-True "ReaPack binary downloaded" { (Get-ChildItem -Path (Join-Path $Fake "UserPlugins") -Filter "reaper_reapack*" -ErrorAction SilentlyContinue).Count -gt 0 }
 Assert-Contains "ReaPack reported checksum-verified" (Join-Path $WorkDir "last_run.log") "checksum-verified"
-Assert-Contains "__startup.lua has the MIDI-GPT ReaImGui bootstrap block" (Join-Path $Fake "Scripts\__startup.lua") "BEGIN MIDI-GPT ReaImGui bootstrap"
+# With direct ReaImGui download, no bootstrap is written
+Assert-Contains "ReaImGui installed" (Join-Path $WorkDir "last_run.log") "ReaImGui installed"
 Assert-Contains "reports reaper.ini not found (fresh REAPER, never launched)" (Join-Path $WorkDir "last_run.log") "reaper.ini not found"
 
 # ============================================================================
@@ -119,31 +120,32 @@ Test-Scenario "Re-run on the same state (idempotency)"
 # ============================================================================
 Invoke-Install $Fake "false" | Out-Null
 Assert-Contains "second run detects ReaPack already installed (no re-download)" (Join-Path $WorkDir "last_run.log") "ReaPack already installed"
-Assert-GrepCount "exactly one MIDI-GPT block in __startup.lua after two runs" 1 "BEGIN MIDI-GPT ReaImGui bootstrap" (Join-Path $Fake "Scripts\__startup.lua")
+# Direct download should detect ImGui already present, no bootstrap needed.
+Assert-True "no duplicate ImGui install on re-run" { -not ((Get-Content (Join-Path $WorkDir "last_run.log")) -like "*Downloading ReaImGui*") }
 Assert-True "exactly one ReaPack binary present (no duplicate downloads)" { (Get-ChildItem -Path (Join-Path $Fake "UserPlugins") -Filter "reaper_reapack*" -ErrorAction SilentlyContinue).Count -eq 1 }
 
 # ============================================================================
-Test-Scenario "ReaImGui already installed -- should not touch __startup.lua"
+Test-Scenario "ReaImGui already installed -- no bootstrap created"
 # ============================================================================
 $Fake = Join-Path $WorkDir "s3_has_imgui"
 New-Item -ItemType Directory -Path (Join-Path $Fake "UserPlugins") -Force | Out-Null
 New-Item -ItemType File -Path (Join-Path $Fake "UserPlugins\reaper_imgui.dll") -Force | Out-Null
 Invoke-Install $Fake "false" | Out-Null
-Assert-False "no __startup.lua written when ReaImGui already present" { Test-Path (Join-Path $Fake "Scripts\__startup.lua") }
+Assert-False "no __startup.lua written when ReaImGui already present (direct download)" { Test-Path (Join-Path $Fake "Scripts\__startup.lua") }
 Assert-True "ReaPack still installed independently" { (Get-ChildItem -Path (Join-Path $Fake "UserPlugins") -Filter "reaper_reapack*" -ErrorAction SilentlyContinue).Count -gt 0 }
 
 # ============================================================================
-Test-Scenario "Pre-existing __startup.lua with unrelated user content"
+Test-Scenario "Pre-existing __startup.lua with unrelated user content (unchanged)"
 # ============================================================================
 $Fake = Join-Path $WorkDir "s4_user_startup"
 New-Item -ItemType Directory -Path (Join-Path $Fake "Scripts") -Force | Out-Null
 Set-Content -Path (Join-Path $Fake "Scripts\__startup.lua") -Value "-- my own startup stuff, unrelated to MIDI-GPT`nreaper.ShowConsoleMsg(`"hello from my own script`n`")"
 Invoke-Install $Fake "false" | Out-Null
 Assert-Contains "user's own startup content survives" (Join-Path $Fake "Scripts\__startup.lua") "hello from my own script"
-Assert-Contains "MIDI-GPT block was appended" (Join-Path $Fake "Scripts\__startup.lua") "BEGIN MIDI-GPT ReaImGui bootstrap"
+# With direct download, __startup.lua is never touched.
+Assert-Contains "user's content still survives after a second run" (Join-Path $Fake "Scripts\__startup.lua") "hello from my own script"
 Invoke-Install $Fake "false" | Out-Null
 Assert-Contains "user's content still survives after a second run" (Join-Path $Fake "Scripts\__startup.lua") "hello from my own script"
-Assert-GrepCount "still exactly one MIDI-GPT block (not duplicated)" 1 "BEGIN MIDI-GPT ReaImGui bootstrap" (Join-Path $Fake "Scripts\__startup.lua")
 
 # ============================================================================
 Test-Scenario "REAPER 'running' (non-interactive) -- ReaPack/reaper.ini must be skipped"
