@@ -136,27 +136,14 @@ CONTENT_MIN_HEIGHT = 320.0
 # GetContentRegionAvail(ctx)'s height, instead of this guess.
 WINDOW_CHROME_ESTIMATE = 50.0
 
-# Below this window width, loop() switches from the normal "2x2" layout
-# (banner+setup share a row, generate+tracks share the next) to a "4x1"
-# layout -- banner, setup, generate, and tracks each stacked full-width,
-# one per row -- since side-by-side stops being usable much narrower than
-# this. A drawing-mode breakpoint only -- NOT a resize floor (see
-# MIN_WINDOW_WIDTH below for why it can't also be one).
-NARROW_LAYOUT_WIDTH = 700.0
+# Fixed window size -- non-resizable for simplicity and stability
+WINDOW_WIDTH = 1400.0
+WINDOW_HEIGHT = 900.0
 
-# The window's actual (and only) width floor, in both layouts. This can't
-# switch to something bigger in "wide" mode the way min height switches
-# per-mode -- if the floor were NARROW_LAYOUT_WIDTH while wide, the window
-# could never be dragged narrower than that floor in the first place, so
-# it could never actually cross the breakpoint into "narrow" mode: a
-# permanent deadlock, since the resize itself always stays clamped to
-# whatever floor is currently set.
-MIN_WINDOW_WIDTH = 380.0
-
-# Window max height is just this multiple of whatever the min height for
-# the current layout works out to -- a placeholder ratio, easy to retune
-# once the narrow layout's actually being used day to day.
-HEIGHT_MAX_MULTIPLIER = 1.5
+# The window's actual size. Non-resizable eliminates the complex layout
+# switching logic and measurement math that was causing issues.
+# MIN_WINDOW_WIDTH = 380.0
+# HEIGHT_MAX_MULTIPLIER = 1.5
 
 # Preferred width of the Generate panel (left column) -- the Tracks mixer
 # to its right gets whatever's left, since that one actually wants it (see
@@ -1307,38 +1294,11 @@ def loop():
         # Mode decided from last frame's actual window width (see
         # last_window_w's comment) -- this frame's real width isn't known
         # until after Begin(), which is too late for a size constraint.
-        # The width floor itself, though, must NOT depend on this mode: if
-        # it did (700 while "wide", 380 once "narrow"), the 700 floor would
-        # never let the window narrow past 700 in the first place, so
-        # last_window_w could never drop below 700, so narrow_layout could
-        # never become true -- a permanent deadlock. MIN_WINDOW_WIDTH is
-        # therefore the unconditional floor in both modes; only min height
-        # depends on which layout is currently active.
-        narrow_layout = last_window_w is not None and last_window_w < NARROW_LAYOUT_WIDTH
-        if narrow_layout:
-            # Four rows stacked instead of two -- Generate and Tracks each
-            # need their own CONTENT_MIN_HEIGHT floor now that they're not
-            # sharing a row.
-            min_window_h = (setup_row_h + CONTENT_MIN_HEIGHT * 2 + console_header_h
-                             + CONSOLE_ROW_HEIGHT + window_chrome_h)
-        else:
-            min_window_h = (setup_row_h + CONTENT_MIN_HEIGHT + console_header_h
-                             + CONSOLE_ROW_HEIGHT + window_chrome_h)
-        max_window_h = min_window_h * HEIGHT_MAX_MULTIPLIER
-        imgui.SetNextWindowSizeConstraints(ctx, MIN_WINDOW_WIDTH, min_window_h, 100000, max_window_h)
-        # "##layout6" (invisible in the title bar -- everything after "##"
-        # is ID-only, not displayed) gives this window a fresh identity with
-        # no saved geometry, so the new SetNextWindowSize above actually
-        # takes effect. Without it, Cond_FirstUseEver is a no-op for anyone
-        # who already has ReaImGui-persisted geometry saved under an older
-        # id from before this layout existed -- it only applies the very
-        # first time a given window id is ever seen, not on every code
-        # change. Bumped from ##layout5 -> ##layout6 alongside simplifying
-        # the console back down to a fixed-height box (no collapsing, no
-        # popout window), since the old layout's proportions no longer
-        # apply. Bump again in the future if the default size/layout
-        # changes enough to want to reset it once more.
-        visible, is_open = imgui.Begin(ctx, "MIDI-GPT Dashboard##layout6", True)
+        # Fixed window size -- non-resizable for stability and simplicity
+        imgui.SetNextWindowSize(ctx, WINDOW_WIDTH, WINDOW_HEIGHT, imgui.Cond_Always)
+        imgui.SetNextWindowSizeConstraints(ctx, WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_WIDTH, WINDOW_HEIGHT)
+        # "##layout7" -- bumped to reset saved geometry after changing to fixed size
+        visible, is_open = imgui.Begin(ctx, "MIDI-GPT Dashboard##layout7", True)
 
         if visible:
             try:
@@ -1351,42 +1311,15 @@ def loop():
                 _, chrome_avail_h = imgui.GetContentRegionAvail(ctx)
                 measured_window_chrome_h = imgui.GetWindowHeight(ctx) - chrome_avail_h
 
-                # Cache the real width for next frame's pre-Begin decision
-                # -- but keep drawing this frame with the SAME narrow_layout
-                # already decided above, rather than re-deriving it from
-                # this fresh value. Re-deriving it here used to let the two
-                # disagree mid-drag (this frame's true width can differ
-                # from the width min_window_h was just sized for), so for
-                # exactly the transitional frame(s) the window would be
-                # sized for one layout while content rendered for the
-                # other -- an overflow that corrupted this ReaImGui
-                # build's window stack ("Assertion failed:
-                # child_window->Flags & ImGuiWindowFlags_ChildWindow") the
-                # same way every other overflow has all session. One
-                # frame of lag on which layout gets drawn during a resize
-                # is a small price for that never happening again.
+                # Cache the real width for next frame
+                # -- no longer needed for layout decisions with fixed size,
+                # but kept for potential future use
                 last_window_w = imgui.GetWindowWidth(ctx)
 
-                # Wide: Setup (rarely touched once configured) shares its
-                # row with the MIDI-GPT wordmark, wordmark on the left,
-                # then Generate (Run Infill + progress + Global Options --
-                # what's touched every run) and Tracks sit side by side
-                # below, both visible at once rather than switching between
-                # them. Narrow: the same four sections stacked full-width,
-                # one per row, since there's no longer room to put any two
-                # of them side by side. No "Setup" label above it either
-                # way -- the row's contents are self-explanatory.
-                if narrow_layout:
-                    avail_w0, _ = imgui.GetContentRegionAvail(ctx)
-                    imgui.PushFont(ctx, mono_font, MGPT_BANNER_FONT_SIZE)
-                    _, banner_text_h = imgui.CalcTextSize(ctx, MGPT_BANNER)
-                    imgui.PopFont(ctx)
-                    banner_row_h = (banner_text_h
-                                     + imgui.GetStyleVar(ctx, imgui.StyleVar_WindowPadding())[1] * 2)
-                    draw_banner(avail_w0, banner_row_h)
-                else:
-                    draw_banner(BANNER_CHILD_WIDTH, setup_row_h)
-                    imgui.SameLine(ctx)
+                # Fixed horizontal layout: banner + setup on top row,
+                # generate and tracks side by side below
+                draw_banner(BANNER_CHILD_WIDTH, setup_row_h)
+                imgui.SameLine(ctx)
 
                 imgui.BeginChild(ctx, "##setup_body", 0, setup_row_h)
                 try:
@@ -1405,19 +1338,14 @@ def loop():
                 avail_w, avail_h = imgui.GetContentRegionAvail(ctx)
 
                 # Console is a flat CONSOLE_ROW_HEIGHT (plus its own
-                # SeparatorText row). Wide: Generate/Tracks share the rest
-                # of the height, side by side, with no ceiling of their
-                # own. Narrow: they split the rest between them instead,
-                # stacked, each still floored at CONTENT_MIN_HEIGHT.
+                # SeparatorText row). Generate and Tracks share the rest
+                # of the height, side by side.
                 stack_h = avail_h - CONSOLE_ROW_HEIGHT - console_header_h
-                if narrow_layout:
-                    generate_w = 0
-                    generate_h = max(CONTENT_MIN_HEIGHT, stack_h / 2)
-                    tracks_h = max(CONTENT_MIN_HEIGHT, stack_h - generate_h)
-                else:
-                    generate_w = min(GENERATE_PANEL_WIDTH, max(260.0, avail_w * 0.4))
-                    generate_h = max(CONTENT_MIN_HEIGHT, stack_h)
-                    tracks_h = generate_h
+                
+                # Fixed panel layout: Generate is fixed width, Tracks takes the rest
+                generate_w = GENERATE_PANEL_WIDTH
+                generate_h = max(CONTENT_MIN_HEIGHT, stack_h)
+                tracks_h = generate_h
 
                 imgui.BeginChild(ctx, "##generate_panel", generate_w, generate_h)
                 try:
@@ -1432,8 +1360,7 @@ def loop():
                 finally:
                     imgui.EndChild(ctx)
 
-                if not narrow_layout:
-                    imgui.SameLine(ctx)
+                imgui.SameLine(ctx)
                 imgui.BeginChild(ctx, "##tracks_panel", 0, tracks_h)
                 try:
                     imgui.SeparatorText(ctx, "Tracks")
