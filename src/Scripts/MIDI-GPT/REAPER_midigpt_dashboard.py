@@ -1295,7 +1295,7 @@ def loop():
         # last_window_w's comment) -- this frame's real width isn't known
         # until after Begin(), which is too late for a size constraint.
         # Fixed window size -- non-resizable for stability and simplicity
-        imgui.SetNextWindowSize(ctx, WINDOW_WIDTH, WINDOW_HEIGHT, imgui.Cond_Always)
+        imgui.SetNextWindowSize(ctx, WINDOW_WIDTH, WINDOW_HEIGHT, imgui.Cond_Always())
         imgui.SetNextWindowSizeConstraints(ctx, WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_WIDTH, WINDOW_HEIGHT)
         # "##layout7" -- bumped to reset saved geometry after changing to fixed size
         visible, is_open = imgui.Begin(ctx, "MIDI-GPT Dashboard##layout7", True)
