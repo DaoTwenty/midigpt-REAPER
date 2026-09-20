@@ -128,9 +128,8 @@ if [ "$RUN_EXIT" -eq 0 ]; then pass "install.sh exits 0"; else fail_test "instal
 assert_true  "symlink created" test -L "$FAKE/Scripts/MIDI-GPT"
 assert_true  "ReaPack binary downloaded" bash -c "find '$FAKE/UserPlugins' -iname 'reaper_reapack*' | grep -q ."
 assert_contains "ReaPack reported checksum-verified" "$WORK_DIR/last_run.log" "checksum-verified"
-# With direct ReaImGui download, bootstrap is only a fallback.
-# Verify ReaImGui gets installed (either direct or via bootstrap fallback).
-assert_contains "ReaImGui installed" "$WORK_DIR/last_run.log" "ReaImGui installed"
+# With direct download approach, ReaImGui is installed immediately (no bootstrap)
+assert_contains "ReaImGui complete package installed" "$WORK_DIR/last_run.log" "ReaImGui"
 assert_contains "reports reaper.ini not found (fresh REAPER, never launched)" "$WORK_DIR/last_run.log" \
     "reaper.ini not found"
 
@@ -140,19 +139,19 @@ scenario "Re-run on the same state (idempotency)"
 run_install "$FAKE" false
 assert_contains "second run detects ReaPack already installed (no re-download)" "$WORK_DIR/last_run.log" \
     "ReaPack already installed"
-# Direct download should detect ImGui already present, no bootstrap needed.
-assert_true "no duplicate ImGui install on re-run" bash -c "! grep -q 'Downloading ReaImGui' '$WORK_DIR/last_run.log'"
+# ReaImGui should not be re-downloaded on re-run
+assert_true "no duplicate ReaImGui download on re-run" bash -c "! grep -q 'Installing ReaImGui' '$WORK_DIR/last_run.log'"
 assert_line_count "exactly one ReaPack binary present (no duplicate downloads)" 1 \
     find "$FAKE/UserPlugins" -iname "reaper_reapack*"
 
 # ============================================================================
-scenario "ReaImGui already installed -- no bootstrap created"
+scenario "ReaImGui already installed -- no re-download"
 # ============================================================================
 FAKE="$WORK_DIR/s3_has_imgui"
 mkdir -p "$FAKE/UserPlugins"
 touch "$FAKE/UserPlugins/reaper_imgui.dylib"
 run_install "$FAKE" false
-assert_false "no __startup.lua written when ReaImGui already present (direct download)" test -f "$FAKE/Scripts/__startup.lua"
+assert_false "no __startup.lua written (we don't use bootstrap anymore)" test -f "$FAKE/Scripts/__startup.lua"
 assert_true  "ReaPack still installed independently" bash -c "find '$FAKE/UserPlugins' -iname 'reaper_reapack*' | grep -q ."
 
 # ============================================================================
@@ -174,15 +173,19 @@ assert_contains "user's content still survives after a second run" "$FAKE/Script
     "hello from my own script"
 
 # ============================================================================
-scenario "REAPER 'running' (non-interactive) -- ReaPack/reaper.ini must be skipped"
+scenario "REAPER 'running' (non-interactive) -- installer exits with error"
 # ============================================================================
 FAKE="$WORK_DIR/s5_running"
 mkdir -p "$FAKE"
 run_install "$FAKE" true
-assert_true  "symlink still created (doesn't need REAPER closed)" test -L "$FAKE/Scripts/MIDI-GPT"
-assert_false "ReaPack NOT downloaded while REAPER is 'running'" bash -c "find '$FAKE/UserPlugins' -iname 'reaper_reapack*' 2>/dev/null | grep -q ."
-assert_contains "explains ReaPack was skipped because REAPER is open" "$WORK_DIR/last_run.log" \
-    "REAPER is still open"
+# Should exit with non-zero because REAPER is running and we're non-interactive
+RUN_EXIT=$?
+TESTS=$((TESTS + 1))
+if [ "$RUN_EXIT" -ne 0 ]; then pass "install.sh exits non-zero when REAPER is running (non-interactive)"; else fail_test "install.sh should exit non-zero when REAPER is running (non-interactive)"; fi
+assert_false "symlink NOT created (install exits early)" test -L "$FAKE/Scripts/MIDI-GPT"
+assert_false "ReaPack NOT downloaded" bash -c "find '$FAKE/UserPlugins' -iname 'reaper_reapack*' 2>/dev/null | grep -q ."
+assert_contains "explains REAPER must be closed" "$WORK_DIR/last_run.log" \
+    "REAPER is currently running"
 
 # ============================================================================
 scenario "reaper.ini exists with unrelated content, REAPER not running"
@@ -221,14 +224,14 @@ assert_true "no duplicate [REAPER] section created" bash -c "[ \$(grep -ci '^\[r
 
 # ============================================================================
 echo ""
-echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 PASSED=$((TESTS - FAILURES))
 if [ "$FAILURES" -eq 0 ]; then
     echo -e "${GREEN}${BOLD}  ALL PASSED: $PASSED/$TESTS assertions${NC}"
 else
     echo -e "${RED}${BOLD}  $FAILURES FAILED: $PASSED/$TESTS assertions passed${NC}"
 fi
-echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
 exit "$FAILURES"

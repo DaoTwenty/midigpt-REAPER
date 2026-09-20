@@ -652,9 +652,10 @@ if [ -d "$REAPER_DIR" ]; then
                 warn "Continuing with REAPER open -- ReaPack install and reaper.ini setup will be skipped this run."
             fi
         else
-            warn "REAPER is currently running -- ReaPack install and reaper.ini setup will be skipped (non-interactive)."
+            warn "REAPER is currently running -- ReaPack install and reaper.ini setup require REAPER to be closed (non-interactive)."
             echo "  Close REAPER, then re-run this installer:"
             echo "    ./install.sh"
+            exit 1
         fi
     fi
 
