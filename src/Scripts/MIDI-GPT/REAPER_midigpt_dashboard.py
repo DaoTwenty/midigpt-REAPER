@@ -1299,7 +1299,7 @@ def loop():
         imgui.SetNextWindowSizeConstraints(ctx, WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_WIDTH, WINDOW_HEIGHT)
         # "##layout7" -- bumped to reset saved geometry after changing to fixed size
         visible, is_open = imgui.Begin(ctx, "MIDI-GPT Dashboard##layout7", True,
-            imgui.WindowFlags_NoScrollbar | imgui.WindowFlags_NoScrollWithMouse)
+            imgui.WindowFlags_NoScrollbar() | imgui.WindowFlags_NoScrollWithMouse())
 
         if visible:
             try:
@@ -1348,7 +1348,7 @@ def loop():
                 generate_w = max(0.0, avail_w * 0.5)
                 generate_h = max(CONTENT_MIN_HEIGHT, stack_h)
                 tracks_h = generate_h
-                no_scroll_flags = imgui.WindowFlags_NoScrollbar | imgui.WindowFlags_NoScrollWithMouse
+                no_scroll_flags = imgui.WindowFlags_NoScrollbar() | imgui.WindowFlags_NoScrollWithMouse()
 
                 imgui.BeginChild(ctx, "##generate_panel", generate_w, generate_h, no_scroll_flags)
                 try:
