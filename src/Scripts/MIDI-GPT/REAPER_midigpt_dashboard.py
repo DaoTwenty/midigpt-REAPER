@@ -137,8 +137,8 @@ CONTENT_MIN_HEIGHT = 320.0
 WINDOW_CHROME_ESTIMATE = 50.0
 
 # Fixed window size -- non-resizable for simplicity and stability
-WINDOW_WIDTH = 1400.0
-WINDOW_HEIGHT = 900.0
+WINDOW_WIDTH = 700.0
+WINDOW_HEIGHT = 600.0
 
 # The window's actual size. Non-resizable eliminates the complex layout
 # switching logic and measurement math that was causing issues.
@@ -1298,7 +1298,8 @@ def loop():
         imgui.SetNextWindowSize(ctx, WINDOW_WIDTH, WINDOW_HEIGHT, imgui.Cond_Always())
         imgui.SetNextWindowSizeConstraints(ctx, WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_WIDTH, WINDOW_HEIGHT)
         # "##layout7" -- bumped to reset saved geometry after changing to fixed size
-        visible, is_open = imgui.Begin(ctx, "MIDI-GPT Dashboard##layout7", True)
+        visible, is_open = imgui.Begin(ctx, "MIDI-GPT Dashboard##layout7", True,
+            imgui.WindowFlags_NoScrollbar | imgui.WindowFlags_NoScrollWithMouse)
 
         if visible:
             try:
@@ -1342,12 +1343,14 @@ def loop():
                 # of the height, side by side.
                 stack_h = avail_h - CONSOLE_ROW_HEIGHT - console_header_h
                 
-                # Fixed panel layout: Generate is fixed width, Tracks takes the rest
-                generate_w = GENERATE_PANEL_WIDTH
+                # Equal width panels: split available width 50/50
+                # Both panels use NoScrollbar/NoScrollWithMouse to prevent scrolling
+                generate_w = max(0.0, avail_w * 0.5)
                 generate_h = max(CONTENT_MIN_HEIGHT, stack_h)
                 tracks_h = generate_h
+                no_scroll_flags = imgui.WindowFlags_NoScrollbar | imgui.WindowFlags_NoScrollWithMouse
 
-                imgui.BeginChild(ctx, "##generate_panel", generate_w, generate_h)
+                imgui.BeginChild(ctx, "##generate_panel", generate_w, generate_h, no_scroll_flags)
                 try:
                     imgui.SeparatorText(ctx, "Generate")
                     if imgui.Button(ctx, "Run Infill", -1, 32):
@@ -1361,7 +1364,7 @@ def loop():
                     imgui.EndChild(ctx)
 
                 imgui.SameLine(ctx)
-                imgui.BeginChild(ctx, "##tracks_panel", 0, tracks_h)
+                imgui.BeginChild(ctx, "##tracks_panel", generate_w, tracks_h, no_scroll_flags)
                 try:
                     imgui.SeparatorText(ctx, "Tracks")
                     need_save_track = draw_track_controls(track_params)
