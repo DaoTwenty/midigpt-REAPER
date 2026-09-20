@@ -112,7 +112,7 @@ Assert-True "Scripts junction created" { Test-Path (Join-Path $Fake "Scripts\MID
 Assert-True "ReaPack binary downloaded" { (Get-ChildItem -Path (Join-Path $Fake "UserPlugins") -Filter "reaper_reapack*" -ErrorAction SilentlyContinue).Count -gt 0 }
 Assert-Contains "ReaPack reported checksum-verified" (Join-Path $WorkDir "last_run.log") "checksum-verified"
 # With direct ReaImGui download, no bootstrap is written
-Assert-Contains "ReaImGui installed" (Join-Path $WorkDir "last_run.log") "ReaImGui installed"
+Assert-Contains "ReaImGui installed and checksum-verified" (Join-Path $WorkDir "last_run.log") "ReaImGui installed"
 Assert-Contains "reports reaper.ini not found (fresh REAPER, never launched)" (Join-Path $WorkDir "last_run.log") "reaper.ini not found"
 
 # ============================================================================
