@@ -289,6 +289,12 @@
     // Fix logo src: replace README's logo image URL with the local assets/logo.svg so it displays on pages
     md = md.replace(/!\[Metacreation Lab\]\([^\)]+\)/g, '![Metacreation Lab](assets/logo.svg)');
 
+    // Any other docs/assets/... reference (e.g. the dashboard screenshot)
+    // is written relative to the repo root, where README.md/INSTRUMENTS.md/
+    // VST.md actually live -- this page lives one level down, inside docs/
+    // itself, so the same path needs assets/... instead to resolve here.
+    md = md.replace(/docs\/assets\//g, 'assets/');
+
     contentEl.innerHTML = marked.parse(md);
     
     // Apply styling class to the logo
