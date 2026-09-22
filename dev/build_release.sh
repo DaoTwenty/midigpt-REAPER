@@ -18,6 +18,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 OUTPUT=""
 VERSION="$(date +%Y%m%d)"
+# Captured before anything below ever cd's elsewhere (the zip step cd's
+# into the staging dir) -- needed to resolve a relative --output= path
+# against where the caller actually ran this script from.
+CALLER_PWD="$(pwd)"
 
 # ── Colors ──────────────────────────────────────────────────────
 GREEN='\033[0;32m'
@@ -49,6 +53,13 @@ done
 
 if [ -z "$OUTPUT" ]; then
     OUTPUT="${SCRIPT_DIR}/MIDI-GPT-for-REAPER-${VERSION}.zip"
+elif [[ "$OUTPUT" != /* ]]; then
+    # An explicit relative --output=PATH (e.g. release.yml passes a bare
+    # filename) must resolve against the caller's cwd -- otherwise the zip
+    # step below (which cd's into a temp staging dir first) would resolve
+    # it against that staging dir instead, and the zip ends up somewhere
+    # the caller never finds it.
+    OUTPUT="${CALLER_PWD}/${OUTPUT}"
 fi
 
 echo -e "${BOLD}"
