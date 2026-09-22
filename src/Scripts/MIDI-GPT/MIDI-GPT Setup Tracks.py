@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-REAPER_midigpt_setup_tracks.py  --  auto-configure MIDI-GPT tracks
-
-For every track in the project:
+@description MIDI-GPT Setup Tracks
+@author Paul Triana
+@version 1.0
+@about
+  Auto-configure MIDI-GPT tracks. For every track in the project:
   1. Detect the track's intended GM instrument from the actual MIDI content
      (channel 10 -> drums, otherwise the track's first Program Change
      event) rather than the track name -- importing a multi-track MIDI file
@@ -402,7 +404,7 @@ def resolve_track_instruments(tracks):
     """detect_instruments(), then prompt one-by-one for whatever it
     couldn't resolve (e.g. freshly-created tracks, or an imported file
     where every track shares the file's name). Native-dialog only -- used
-    by this script's and REAPER_midigpt_apply_soundfont_template.py's own
+    by this script's and MIDI-GPT Replace Instruments.py's own
     standalone/hotkey entry points; the dashboard has its own ReaImGui
     confirmation popup instead (see midigpt_dashboard/setup_panel.py) so it
     isn't limited to the macOS-only picker below.
@@ -557,13 +559,13 @@ def apply_track_setup(tracks, instruments, name_only=False, replace_existing=Fal
     track -> GM instrument choices in `instruments` (None = leave that
     track's instrument unresolved/untouched). Pure "do it" step, no
     detection or prompting of its own -- callers (run_setup_tracks below,
-    REAPER_midigpt_apply_soundfont_template.py, and the dashboard's
+    MIDI-GPT Replace Instruments.py, and the dashboard's
     ReaImGui wizard) are responsible for arriving at `instruments` first.
 
     name_only=True never touches FX at all, even on a track that already
     has an instrument -- it only renames. replace_existing=True deletes
     whatever instrument FX is already on a track before adding a fresh
-    one (REAPER_midigpt_apply_soundfont_template.py's "force" behavior);
+    one (MIDI-GPT Replace Instruments.py's "force" behavior);
     False (the default) leaves a track that already has an instrument
     alone, same as ensure_instrument's own ownership-respecting check."""
     print(f"Configuring {len(tracks)} track(s)...\n")

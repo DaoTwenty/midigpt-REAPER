@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-REAPER_midigpt_set_server.py  --  configure the MIDI-GPT server address
-
-Prompts for the MIDI-GPT HTTP server URL (host/IP/domain, optionally with
-port) and persists it via REAPER's ExtState so REAPER_midigpt_infill.py
-picks it up on every run. Use this when the server is not running on the
-same machine as REAPER (e.g. a remote workstation or a machine on the LAN).
+@description MIDI-GPT Set Server
+@author Paul Triana
+@version 1.0
+@about
+  Prompts for the MIDI-GPT HTTP server URL (host/IP/domain, optionally with
+  port) and persists it via REAPER's ExtState so MIDI-GPT Generate.py picks
+  it up on every run. Use this when the server is not running on the same
+  machine as REAPER (e.g. a remote workstation or a machine on the LAN).
 """
 
 from reaper_python import *

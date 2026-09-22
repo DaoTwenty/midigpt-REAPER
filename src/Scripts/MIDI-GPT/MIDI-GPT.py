@@ -1,6 +1,13 @@
 # -*- coding: utf-8 -*-
 """
-MIDI-GPT Dashboard - Native imgui Table Layout (Fixed Size)
+@description MIDI-GPT
+@author Paul Triana
+@version 1.0
+@about
+  The main MIDI-GPT dashboard: one window for the whole workflow (server/
+  model selection, global generation settings, per-track controls, running
+  generation, and the console/information log). Native ReaImGui table
+  layout, fixed size.
 """
 
 import sys

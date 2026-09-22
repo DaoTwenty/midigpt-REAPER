@@ -2,11 +2,16 @@
 
 import json
 import copy
+import importlib
 
 from reaper_python import *
 
-import REAPER_midigpt_infill as infill
-import REAPER_midigpt_setup_tracks as setup_tracks
+# The sibling REAPER action scripts have spaces in their filenames (e.g.
+# "MIDI-GPT Generate.py"), which isn't valid `import` statement syntax --
+# importlib.import_module() takes the literal string instead, resolved via
+# the same path-based finder REAPER puts this script's own directory on.
+infill = importlib.import_module("MIDI-GPT Generate")
+setup_tracks = importlib.import_module("MIDI-GPT Setup Tracks")
 
 from . import notify, setup_panel
 
@@ -213,7 +218,7 @@ class DashboardLogic:
             # extraction.masks only reflects the raw selection -- it
             # doesn't know that an autoregressive track expands to every
             # bar in the window regardless of what's selected on it (see
-            # get_track_prompts() in REAPER_midigpt_infill.py, which
+            # get_track_prompts() in MIDI-GPT Generate.py, which
             # already resolves that expansion into each prompt's "bars").
             # Reading it from there instead keeps this honest: 1 bar
             # selected on an AR track reports as however many bars are

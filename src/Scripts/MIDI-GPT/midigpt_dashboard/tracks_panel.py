@@ -1,13 +1,17 @@
 """Horizontal mixer-style track panel."""
 
 import sys
+import importlib
 
 from reaper_python import *
 
 sys.path.append(RPR_GetResourcePath() + "/Scripts/ReaTeam Extensions/API")
 import imgui
 
-import REAPER_midigpt_setup_tracks as setup_tracks
+# "MIDI-GPT Setup Tracks.py" has a space in its filename, which isn't valid
+# `import` statement syntax -- importlib.import_module() takes the literal
+# string instead, resolved via the same path-based finder.
+setup_tracks = importlib.import_module("MIDI-GPT Setup Tracks")
 
 from . import hints
 from .constants import NOTE_DURATION_LABELS, NOTE_NAMES, SCALE_LABELS, TRACK_ATTRIBUTE_SUPPORT
@@ -15,7 +19,7 @@ from .constants import NOTE_DURATION_LABELS, NOTE_NAMES, SCALE_LABELS, TRACK_ATT
 
 def _is_drum_track(name):
     """Best-effort drum/melodic guess from the track's current name alone
-    -- cheap (no MIDI scan) and matches what REAPER_midigpt_infill.py's own
+    -- cheap (no MIDI scan) and matches what MIDI-GPT Generate.py's own
     name-based fallback detection already does for an already-resolved
     track (see resolve_track_instruments()/detect_instruments()). Only
     used to decide which Core controls to show; the actual request-time

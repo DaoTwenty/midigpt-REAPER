@@ -1,8 +1,8 @@
 """Color theme support: a small set of named palettes applied to the whole
-dashboard once per frame (REAPER_midigpt_dashboard.py's loop()), selectable
+dashboard once per frame (MIDI-GPT.py's loop()), selectable
 from the Settings popup (settings_panel.py). Persisted globally via
 REAPER's ExtState (a UI preference, not a generation parameter), same
-mechanism as the server URL in REAPER_midigpt_infill.py.
+mechanism as the server URL in MIDI-GPT Generate.py.
 
 Each theme is a handful of "roles" (background, panel, border, text,
 accent, ...) rather than the ~30 individual ImGui colors actually needed --

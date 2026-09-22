@@ -13,7 +13,9 @@
 set -euo pipefail
 
 # ── Config ──────────────────────────────────────────────────────
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# This script lives in dev/ -- SCRIPT_DIR resolves to the repo root (one
+# level up), which is what every path below actually means by it.
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 OUTPUT=""
 VERSION="$(date +%Y%m%d)"
 
@@ -84,51 +86,25 @@ for f in \
 done
 
 # ── Documentation ──
+info "Regenerating docs/index.html from README.md + INSTRUMENTS.md + VST.md..."
+python3 "$SCRIPT_DIR/build_docs.py"
 cp "$SCRIPT_DIR/README.md" "$RELEASE_DIR/"
 mkdir -p "$RELEASE_DIR/docs"
 cp "$SCRIPT_DIR/docs/index.html" "$RELEASE_DIR/docs/"
 
-# ── Python package metadata ──
-cp "$SCRIPT_DIR/pyproject.toml" "$RELEASE_DIR/"
-
-# ── Setup script (creates REAPER symlinks) ──
-mkdir -p "$RELEASE_DIR/scripts"
-cp "$SCRIPT_DIR/scripts/setup.py" "$RELEASE_DIR/scripts/"
-
 # ── Source: Scripts (REAPER script, extraction) ──
 mkdir -p "$RELEASE_DIR/src/Scripts/MIDI-GPT"
-for f in REAPER_midigpt_infill.py REAPER_midigpt_set_server.py REAPER_midigpt_setup_tracks.py REAPER_midigpt_apply_soundfont_template.py REAPER_midigpt_dashboard.py midi_extraction.py; do
+midigpt_scripts=(
+    "MIDI-GPT Generate.py" "MIDI-GPT Set Server.py" "MIDI-GPT Setup Tracks.py"
+    "MIDI-GPT Replace Instruments.py" "MIDI-GPT.py" "midi_extraction.py"
+)
+for f in "${midigpt_scripts[@]}"; do
     cp "$SCRIPT_DIR/src/Scripts/MIDI-GPT/$f" "$RELEASE_DIR/src/Scripts/MIDI-GPT/$f"
 done
 cp -R "$SCRIPT_DIR/src/Scripts/MIDI-GPT/midigpt_dashboard" "$RELEASE_DIR/src/Scripts/MIDI-GPT/"
+find "$RELEASE_DIR/src/Scripts/MIDI-GPT/midigpt_dashboard" -name "__pycache__" -exec rm -rf {} +
 
 ok "Source copied"
-
-# ── 1b. Rebuild docs/index.html with embedded README ───────────────────
-
-info "Embedding README.md into docs/index.html..."
-python3 -c "
-import pathlib, re
-
-root = pathlib.Path('$RELEASE_DIR')
-readme = (root / 'README.md').read_text()
-readme_safe = readme.replace('</script>', '<\\\\/script>')
-
-html_path = root / 'docs' / 'index.html'
-html = html_path.read_text()
-
-script_re = re.compile(
-    r'(<script id=\"readme-source\" type=\"text/plain\">)\n.*?\n(</script>)',
-    re.DOTALL,
-)
-if script_re.search(html):
-    html = script_re.sub(lambda m: f'{m.group(1)}\n{readme_safe}\n{m.group(2)}', html)
-    html_path.write_text(html)
-    print(f'docs/index.html updated ({len(readme)} chars)')
-else:
-    print('WARNING: could not find readme-source tag in docs/index.html')
-"
-ok "docs/index.html updated"
 
 # ── 2. Create final release zip ────────────────────────────────
 

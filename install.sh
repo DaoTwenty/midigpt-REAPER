@@ -160,7 +160,7 @@ open_url() {
 
 # Downloads the Arachno GM SoundFont into this repo's own soundfonts/
 # folder (kept alongside the plugin, not scattered into REAPER's resource
-# dir), under its real filename -- REAPER_midigpt_setup_tracks.py reads
+# dir), under its real filename -- MIDI-GPT Setup Tracks.py reads
 # whatever .sf2 is actually there rather than a hardcoded name, so this
 # doesn't need to match anything else exactly. Arachno is freeware and this
 # is the exact .zip Arachnosoft's own download page links to (mirrored on
@@ -331,6 +331,7 @@ except Exception:
 # ── Args ────────────────────────────────────────────────────────
 
 REAPER_ONLY=false
+BACKEND_ONLY=false
 TORCH_GPU=false
 DEV_MODE=false
 
@@ -339,6 +340,7 @@ for arg in "$@"; do
         --skip-deps) SKIP_DEPS=true ;;
         --skip-reaper-config) SKIP_REAPER_CONFIG=true ;;
         --reaper-only) REAPER_ONLY=true ;;
+        --backend-only) BACKEND_ONLY=true ;;
         --torch-gpu) TORCH_GPU=true ;;
         --dev) DEV_MODE=true ;;
         --midigpt-src=*)
@@ -355,6 +357,9 @@ for arg in "$@"; do
             echo "  --reaper-only        Only do REAPER integration (Step 4/5: symlinks, ReaPack,"
             echo "                       ReaImGui, reaper.ini) -- skips venv/backend entirely."
             echo "                       Useful to redo just the REAPER side, or for testing."
+            echo "  --backend-only       Only do venv/backend (Steps 1-3, 6) -- skips REAPER"
+            echo "                       integration entirely, so it never needs REAPER closed."
+            echo "                       What update.sh uses to refresh the backend in place."
             echo "  --torch-gpu          Install PyTorch with GPU support (CUDA on Linux/Windows,"
             echo "                       MPS on macOS is included in default wheel)."
             echo "  --dev                Install plugin in editable mode (-e) for development."
@@ -367,6 +372,7 @@ for arg in "$@"; do
             echo "  ./install.sh --dev                             # Development install (editable)"
             echo "  ./install.sh --midigpt-src=/custom/path        # Custom MIDI-GPT source path"
             echo "  ./install.sh --reaper-only                     # Just (re)do REAPER integration"
+            echo "  ./install.sh --backend-only                    # Just refresh venv/backend"
             exit 0
             ;;
         *) warn "Unknown option: $arg" ;;
@@ -651,6 +657,12 @@ fi
 
 fi # REAPER_ONLY == false (Steps 1-3)
 
+# Referenced unconditionally later (the relaunch check, and the final
+# summary) so this must be defined even under --backend-only, which skips
+# the block below that would otherwise set it.
+REAPER_WAS_CLOSED_BY_US=false
+
+if [ "$BACKEND_ONLY" = false ]; then
 # ====================================================================
 # Step 4: REAPER Integration (Symlinks, ReaPack, ReaImGui)
 # ====================================================================
@@ -671,8 +683,6 @@ elif [ "$PLATFORM" = "windows" ]; then
 else
     REAPER_DIR="$HOME/.config/REAPER"
 fi
-
-REAPER_WAS_CLOSED_BY_US=false
 
 if [ -d "$REAPER_DIR" ]; then
     # Installing ReaPack and configuring reaper.ini (Step 5) both need REAPER
@@ -950,6 +960,7 @@ else
     fi
 fi
 fi
+fi # BACKEND_ONLY == false (Steps 4-5)
 
 # Check if we need to launch REAPER:
 # 1. We closed REAPER ourselves (for ReaPack/reaper.ini changes)
@@ -1052,28 +1063,38 @@ fi # REAPER_ONLY == false (Step 6 + Desktop shortcut)
 
 echo ""
 echo -e "${BOLD}════════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}${BOLD}  Installation Complete!${NC}"
+if [ "$BACKEND_ONLY" = true ]; then
+    echo -e "${GREEN}${BOLD}  Backend Updated!${NC}"
+else
+    echo -e "${GREEN}${BOLD}  Installation Complete!${NC}"
+fi
 echo -e "${BOLD}════════════════════════════════════════════════════${NC}"
 echo ""
 
+# $REAPER_DIR is only ever set inside the Step 4 block above, which
+# --backend-only skips entirely -- nothing below this point may reference
+# it (or anything else REAPER-side) unguarded.
+if [ "$BACKEND_ONLY" = false ]; then
 echo -e "${BOLD}Next steps in REAPER:${NC}"
 echo ""
 echo "  1. Load the ReaScript actions:"
 echo "     Actions > Show Action List > Load ReaScript"
-echo "     Select: $REAPER_DIR/Scripts/MIDI-GPT/REAPER_midigpt_dashboard.py   (primary UI)"
-echo "     Select: $REAPER_DIR/Scripts/MIDI-GPT/REAPER_midigpt_infill.py"
-echo "     Select: $REAPER_DIR/Scripts/MIDI-GPT/REAPER_midigpt_set_server.py"
-echo "     Select: $REAPER_DIR/Scripts/MIDI-GPT/REAPER_midigpt_setup_tracks.py"
-echo "     Select: $REAPER_DIR/Scripts/MIDI-GPT/REAPER_midigpt_apply_soundfont_template.py"
+echo "     Select: $REAPER_DIR/Scripts/MIDI-GPT/MIDI-GPT.py   (primary UI)"
+echo "     Select: $REAPER_DIR/Scripts/MIDI-GPT/MIDI-GPT Generate.py"
+echo "     Select: $REAPER_DIR/Scripts/MIDI-GPT/MIDI-GPT Set Server.py"
+echo "     Select: $REAPER_DIR/Scripts/MIDI-GPT/MIDI-GPT Setup Tracks.py"
+echo "     Select: $REAPER_DIR/Scripts/MIDI-GPT/MIDI-GPT Replace Instruments.py"
 echo ""
-echo "  2. Run 'MIDI-GPT: Dashboard' — it's a single window for the whole"
+echo "  2. Run 'MIDI-GPT.py' — it's a single window for the whole"
 echo "     workflow (global options, per-track controls, running generation)."
 echo "     Needs the ReaImGui extension -- see the warning above if it's missing."
 echo ""
 echo "  If the MIDI-GPT server runs on a different machine, run the"
-echo "  'MIDI-GPT: Set server address' action and enter its IP/domain and port"
+echo "  'MIDI-GPT Set Server.py' action and enter its IP/domain and port"
 echo "  (e.g. http://192.168.1.20:3456). Defaults to http://127.0.0.1:3456."
 echo ""
+fi # BACKEND_ONLY == false (REAPER-side next steps)
+
 echo -e "${BOLD}To start the server:${NC}"
 if [ "$DESKTOP_SHORTCUT_CREATED" = true ]; then
     echo -e "  Double-click ${GREEN}Start MIDI-GPT Server${NC} on your Desktop"
@@ -1091,7 +1112,9 @@ echo ""
 # Interactive: Instrument setup (Sforzando + Arachno)
 # ====================================================================
 
-if [ -t 0 ]; then
+# A one-time setup question, not something a --backend-only refresh
+# (update.sh) should re-ask every single time it runs.
+if [ -t 0 ] && [ "$BACKEND_ONLY" = false ]; then
     echo ""
     echo -e "${BOLD}----------------------------------------------------${NC}"
     echo -e "${BOLD}  Optional: Instrument Setup (Sforzando + Arachno)${NC}"

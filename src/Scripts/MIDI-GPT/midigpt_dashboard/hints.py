@@ -8,7 +8,7 @@ silent no-op, never an error.
 
 Persisted globally via REAPER's ExtState (not per-project -- this is a UI
 preference, not a generation parameter), same mechanism as the server URL
-in REAPER_midigpt_infill.py.
+in MIDI-GPT Generate.py.
 """
 
 import json

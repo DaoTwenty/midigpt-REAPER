@@ -1,7 +1,7 @@
 """Error/warning popups -- surfaces a failure or caution loudly instead of
 leaving it sitting in the Console tab where it's easy to miss. Call
 error()/warning() from anywhere (they're plain Python, no imgui context
-needed -- logic.py's the main caller); REAPER_midigpt_dashboard.py's
+needed -- logic.py's the main caller); MIDI-GPT.py's
 loop() calls draw() once per frame to actually show whichever one is
 pending.
 

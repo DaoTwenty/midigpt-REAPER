@@ -1,10 +1,17 @@
 """Server and track setup controls."""
 
+import importlib
+
 from reaper_python import *
 
 import imgui
-import REAPER_midigpt_infill as infill
-import REAPER_midigpt_setup_tracks as setup_tracks
+
+# These sibling REAPER action scripts have spaces in their filenames (e.g.
+# "MIDI-GPT Generate.py"), which isn't valid `import` statement syntax --
+# importlib.import_module() takes the literal string instead, resolved via
+# the same path-based finder REAPER puts this script's own directory on.
+infill = importlib.import_module("MIDI-GPT Generate")
+setup_tracks = importlib.import_module("MIDI-GPT Setup Tracks")
 
 from . import hints, settings_panel
 
@@ -73,7 +80,7 @@ def _draw_server_popup(ctx, window_center):
     action = None
     imgui.SetNextWindowPos(ctx, window_center[0], window_center[1], imgui.Cond_Appearing(), 0.5, 0.5)
     # The popup would otherwise inherit the dashboard's global
-    # WindowPadding(0, 0) (pushed in REAPER_midigpt_dashboard.py so the
+    # WindowPadding(0, 0) (pushed in MIDI-GPT.py so the
     # grid's child panels sit flush against their cells), leaving the
     # input/buttons jammed against the popup's edges.
     imgui.PushStyleVar(ctx, imgui.StyleVar_WindowPadding(), 16, 16)
@@ -235,7 +242,7 @@ def _draw_track_confirm_popup(ctx, window_center):
     confirm/override" selected -- every track, pre-filled with the
     detected guess (or "(unresolved -- skip)"). "Apply" hands the final
     per-track choices off to logic.run_action("run_track_setup"), which
-    calls REAPER_midigpt_setup_tracks.apply_track_setup() with them."""
+    calls apply_track_setup() (from MIDI-GPT Setup Tracks.py) with them."""
     action = None
     imgui.SetNextWindowPos(ctx, window_center[0], window_center[1], imgui.Cond_Appearing(), 0.5, 0.5)
     imgui.PushStyleVar(ctx, imgui.StyleVar_WindowPadding(), 16, 16)

@@ -124,10 +124,4 @@ jobs:
         run: pip install pytest
 
       - name: Run unit tests
-        run: python -m pytest tests/ -v --tb=short -k "not test_piano_default"
-        # test_piano_default is a known pre-existing failure (unrelated to
-        # install/setup_tracks work): get_instrument_from_track_name now
-        # returns None for unmatched names by design (track name is ground
-        # truth, see midi_extraction.py), but that test still expects the
-        # old default-to-piano behavior. Excluded here rather than left
-        # red; remove this -k filter once it's fixed or the test's updated.
+        run: python -m pytest tests/ -v --tb=short

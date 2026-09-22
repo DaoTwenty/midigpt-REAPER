@@ -258,14 +258,35 @@ class TestTimeSelection:
         ts = TimeSelection(2.0, 6.0, 1, 3)
         assert ts.duration == pytest.approx(4.0)
 
+    def test_bar_aligned_by_default(self):
+        """No slack given -- e.g. a selection that landed exactly on bar lines."""
+        ts = TimeSelection(1.0, 5.0, 0, 4)
+        assert ts.is_bar_misaligned is False
+
+    def test_misaligned_start(self):
+        ts = TimeSelection(1.0, 5.0, 0, 4, start_slack=0.5)
+        assert ts.is_bar_misaligned is True
+
+    def test_misaligned_end(self):
+        ts = TimeSelection(1.0, 5.0, 0, 4, end_slack=0.5)
+        assert ts.is_bar_misaligned is True
+
+    def test_tiny_slack_within_epsilon_not_misaligned(self):
+        """Floating-point fuzz shouldn't trip the warning."""
+        ts = TimeSelection(1.0, 5.0, 0, 4, start_slack=1e-9, end_slack=1e-9)
+        assert ts.is_bar_misaligned is False
+
 
 # ===================================================================
 # Instrument mapping
 # ===================================================================
 
 class TestInstrumentMapping:
-    def test_piano_default(self):
-        assert get_instrument_from_track_name("Unknown Track") == 0
+    def test_unmatched_name_returns_none(self):
+        """No keyword match -- callers (REAPERMIDIExtractor._detect_instrument)
+        fall back to MIDI-content detection, then finally default to piano
+        themselves. This function only resolves name matches."""
+        assert get_instrument_from_track_name("Unknown Track") is None
 
     def test_drums(self):
         assert get_instrument_from_track_name("Drum Kit") == 128

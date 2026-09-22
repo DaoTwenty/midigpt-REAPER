@@ -1,8 +1,8 @@
 """
 Shared test fixtures and stubs.
 
-Stubs out reaper_python and mmm_refactored so tests can import the project
-modules without requiring REAPER or the C++ extension.
+Stubs out reaper_python so tests can import the project modules without
+requiring REAPER to be running.
 """
 
 import sys

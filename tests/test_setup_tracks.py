@@ -1,5 +1,5 @@
 """
-Tests for REAPER_midigpt_setup_tracks.py's on-the-fly Sforzando+Arachno
+Tests for MIDI-GPT Setup Tracks.py's on-the-fly Sforzando+Arachno
 instrument generation -- see the module comment above ARACHNO_MELODIC_NAMES
 in that file for the full story.
 
@@ -12,6 +12,7 @@ as close as this repo gets to that without one.
 """
 
 import base64
+import importlib
 import os
 import struct
 import sys
@@ -26,8 +27,12 @@ import pytest
 # (see conftest.py), so anything that then tries to print() raises
 # NameError. Save/restore around the import so the rest of the test session
 # (including pytest's own output) isn't collateral damage.
+#
+# "MIDI-GPT Setup Tracks.py" has a space in its filename, which isn't valid
+# `import` statement syntax -- importlib.import_module() takes the literal
+# string instead, resolved via the same path-based finder.
 _real_stdout, _real_stderr = sys.stdout, sys.stderr
-import REAPER_midigpt_setup_tracks as setup_tracks  # noqa: E402
+setup_tracks = importlib.import_module("MIDI-GPT Setup Tracks")  # noqa: E402
 sys.stdout, sys.stderr = _real_stdout, _real_stderr
 
 
@@ -47,7 +52,7 @@ def fake_soundfonts_dir(tmp_path, monkeypatch):
     # _find_arachno_sf2_name derives <repo> from this module's own file
     # location (4 levels up from src/Scripts/MIDI-GPT/<this file>.py) via
     # os.path.realpath(__file__) -- fake that instead of the real repo tree.
-    fake_module_path = repo_dir / "src" / "Scripts" / "MIDI-GPT" / "REAPER_midigpt_setup_tracks.py"
+    fake_module_path = repo_dir / "src" / "Scripts" / "MIDI-GPT" / "MIDI-GPT Setup Tracks.py"
     fake_module_path.parent.mkdir(parents=True)
     monkeypatch.setattr(setup_tracks, "__file__", str(fake_module_path))
     return soundfonts_dir
@@ -102,7 +107,7 @@ class TestFindArachnoSf2Name:
         assert setup_tracks._find_arachno_sf2_name() == REAL_ARACHNO_SF2_NAME
 
     def test_none_when_soundfonts_dir_missing(self, tmp_path, monkeypatch):
-        fake_module_path = tmp_path / "repo" / "src" / "Scripts" / "MIDI-GPT" / "REAPER_midigpt_setup_tracks.py"
+        fake_module_path = tmp_path / "repo" / "src" / "Scripts" / "MIDI-GPT" / "MIDI-GPT Setup Tracks.py"
         fake_module_path.parent.mkdir(parents=True)
         monkeypatch.setattr(setup_tracks, "__file__", str(fake_module_path))
         assert setup_tracks._find_arachno_sf2_name() is None
@@ -110,7 +115,7 @@ class TestFindArachnoSf2Name:
     def test_none_when_dir_has_no_sf2(self, tmp_path, monkeypatch):
         repo_dir = tmp_path / "repo"
         (repo_dir / "soundfonts").mkdir(parents=True)
-        fake_module_path = repo_dir / "src" / "Scripts" / "MIDI-GPT" / "REAPER_midigpt_setup_tracks.py"
+        fake_module_path = repo_dir / "src" / "Scripts" / "MIDI-GPT" / "MIDI-GPT Setup Tracks.py"
         fake_module_path.parent.mkdir(parents=True)
         monkeypatch.setattr(setup_tracks, "__file__", str(fake_module_path))
         assert setup_tracks._find_arachno_sf2_name() is None
@@ -120,7 +125,7 @@ class TestFindArachnoSf2Name:
         soundfonts_dir = repo_dir / "soundfonts"
         soundfonts_dir.mkdir(parents=True)
         (soundfonts_dir / "readme.txt").write_text("not a soundfont")
-        fake_module_path = repo_dir / "src" / "Scripts" / "MIDI-GPT" / "REAPER_midigpt_setup_tracks.py"
+        fake_module_path = repo_dir / "src" / "Scripts" / "MIDI-GPT" / "MIDI-GPT Setup Tracks.py"
         fake_module_path.parent.mkdir(parents=True)
         monkeypatch.setattr(setup_tracks, "__file__", str(fake_module_path))
         assert setup_tracks._find_arachno_sf2_name() is None
@@ -140,7 +145,7 @@ class TestArachnoSlotName:
         assert "/128/007_Drum_Kit" in slot
 
     def test_none_when_soundfont_not_found(self, tmp_path, monkeypatch):
-        fake_module_path = tmp_path / "repo" / "src" / "Scripts" / "MIDI-GPT" / "REAPER_midigpt_setup_tracks.py"
+        fake_module_path = tmp_path / "repo" / "src" / "Scripts" / "MIDI-GPT" / "MIDI-GPT Setup Tracks.py"
         fake_module_path.parent.mkdir(parents=True)
         monkeypatch.setattr(setup_tracks, "__file__", str(fake_module_path))
         assert setup_tracks._arachno_slot_name(0, 0, "Grand Piano") is None
@@ -148,7 +153,7 @@ class TestArachnoSlotName:
 
 class TestBuildSforzandoVstBlock:
     def test_none_when_soundfont_not_found(self, tmp_path, monkeypatch):
-        fake_module_path = tmp_path / "repo" / "src" / "Scripts" / "MIDI-GPT" / "REAPER_midigpt_setup_tracks.py"
+        fake_module_path = tmp_path / "repo" / "src" / "Scripts" / "MIDI-GPT" / "MIDI-GPT Setup Tracks.py"
         fake_module_path.parent.mkdir(parents=True)
         monkeypatch.setattr(setup_tracks, "__file__", str(fake_module_path))
         assert setup_tracks._build_sforzando_vst_block(0) is None
@@ -198,7 +203,7 @@ class TestBuildSforzandoVstBlock:
 
 class TestBuildSourceTrackChunk:
     def test_none_when_soundfont_not_found(self, tmp_path, monkeypatch):
-        fake_module_path = tmp_path / "repo" / "src" / "Scripts" / "MIDI-GPT" / "REAPER_midigpt_setup_tracks.py"
+        fake_module_path = tmp_path / "repo" / "src" / "Scripts" / "MIDI-GPT" / "MIDI-GPT Setup Tracks.py"
         fake_module_path.parent.mkdir(parents=True)
         monkeypatch.setattr(setup_tracks, "__file__", str(fake_module_path))
         assert setup_tracks._build_source_track_chunk("test track", 0) is None

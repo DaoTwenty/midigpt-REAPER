@@ -1,13 +1,10 @@
-src/Scripts/composers_assistant_v2/models_permuted_labels/
-
 *.pyc
 *.DS_Store
 /midigpt_dependencies
 /midigpt_workspace
-/src/Scripts/composers_assistant_v2/temp_midi
 /MIDI-GPT
 /venv
-/MMM
+/build
 # Model weights and training artifacts
 *.pt
 *.pth
@@ -36,8 +33,6 @@ src/Scripts/composers_assistant_v2/models_permuted_labels/
 __pycache__/
 *.egg-info/
 /src/MIDIGPT_Reaper.egg-info/
-/src/Scripts/MMM/debug_dumps/
-=2.0
 
 # Local-only PRISM testing convenience (see .prism/config.yaml) -- not a
 # project feature, just how Claude reaches nibi via MFA-aware SSH for tests.

@@ -1,14 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-REAPER_midigpt_infill.py  --  REAPER-side MIDI-GPT client
-
-On every run:
-  1. Call GET /info to fetch loaded model metadata (capabilities, resolution, attributes).
-  2. Read Global Options and per-track options saved by REAPER_midigpt_dashboard.py.
-  3. Extract MIDI from selected items in REAPER.
-  4. Convert to a stateless Score JSON payload.
-  5. Submit to POST /generate.
-  6. Write the returned generated MIDI back to REAPER.
+@description MIDI-GPT Generate
+@author Paul Triana
+@version 1.0
+@about
+  REAPER-side MIDI-GPT client. On every run:
+    1. Call GET /info to fetch loaded model metadata (capabilities, resolution, attributes).
+    2. Read Global Options and per-track options saved by MIDI-GPT.py.
+    3. Extract MIDI from selected items in REAPER.
+    4. Convert to a stateless Score JSON payload.
+    5. Submit to POST /generate.
+    6. Write the returned generated MIDI back to REAPER.
 """
 
 import sys
@@ -64,7 +66,7 @@ def get_server_url():
 def set_server_url(url):
     """Persists the MIDI-GPT server URL, normalizing a bare host:port into
     a full http:// URL and stripping any trailing slash -- same
-    normalization REAPER_midigpt_set_server.py's dialog already applies.
+    normalization MIDI-GPT Set Server.py's dialog already applies.
     Returns the normalized URL, or None if given nothing to save (an empty
     field commits nothing rather than clearing back to the default).
     A plain ExtState write, not a blocking call, so callers may run this
@@ -355,7 +357,7 @@ class GlobalOptions:
 GLOBAL_PARAMS_KEY = "global_params_v1"
 
 def get_global_options() -> GlobalOptions:
-    """Read global options saved by REAPER_midigpt_dashboard.py (ReaImGui).
+    """Read global options saved by MIDI-GPT.py (ReaImGui).
     Returns defaults if the dashboard has never saved anything for this
     project."""
     opts = GlobalOptions()
@@ -376,7 +378,7 @@ def get_global_options() -> GlobalOptions:
 TRACK_PARAMS_KEY = "track_params_v1"
 
 def _get_track_params_from_dashboard() -> dict:
-    """Read per-track options saved by REAPER_midigpt_dashboard.py, keyed by
+    """Read per-track options saved by MIDI-GPT.py, keyed by
     track GUID. Returns {} if the dashboard has never saved anything for
     this project -- callers fall back to defaults for those tracks."""
     ret, _, _, _, value, _ = RPR_GetProjExtState(0, EXT_STATE_SECTION, TRACK_PARAMS_KEY, "", 262144)
@@ -487,7 +489,7 @@ def get_track_prompts(num_measures: int, model_type: str, extraction):
     """
     Read per-track options and attributes for each track, returning a list of
     TrackPrompt dicts matching the structure of midigpt.inference.config.TrackPrompt.
-    Values come from REAPER_midigpt_dashboard.py (keyed by track GUID); a
+    Values come from MIDI-GPT.py (keyed by track GUID); a
     track the dashboard has never touched just gets defaults.
     """
     tracks_prompts = []
@@ -772,6 +774,32 @@ def prepare_generation():
     # these as popups (see logic.py:start_generation()) -- console-only is
     # easy to miss for something worth knowing before the request goes out.
     warnings = []
+
+    time_selection = extraction.time_selection
+    if time_selection.has_selection and time_selection.is_bar_misaligned:
+        tempo_map = extraction.tempo_map
+        start_bar_len = (tempo_map.measure_to_time(time_selection.start_measure + 1)
+                          - tempo_map.measure_to_time(time_selection.start_measure))
+        end_bar_len = (tempo_map.measure_to_time(time_selection.end_measure)
+                        - tempo_map.measure_to_time(time_selection.end_measure - 1))
+        edges = []
+        if time_selection.start_slack > 1e-3:
+            pct = (time_selection.start_slack / start_bar_len * 100) if start_bar_len > 0 else 0
+            edges.append(f"starts {time_selection.start_slack:.2f}s (~{pct:.0f}% of a bar) early")
+        if time_selection.end_slack > 1e-3:
+            pct = (time_selection.end_slack / end_bar_len * 100) if end_bar_len > 0 else 0
+            edges.append(f"ends {time_selection.end_slack:.2f}s (~{pct:.0f}% of a bar) late")
+        msg = (
+            f"Your loop/time selection isn't aligned to REAPER's bar grid -- it {' and '.join(edges)} "
+            f"relative to the nearest bar line, so extraction rounded outward to whole bars "
+            f"({num_measures} bar(s) sent instead of exactly what you selected). If your song's "
+            "downbeat doesn't line up with REAPER's own bar 1 (e.g. a pickup measure), check "
+            "REAPER's project measure/beat-offset setting; otherwise try re-snapping the loop "
+            "points to the grid."
+        )
+        print(f"WARNING: {msg}\n")
+        warnings.append(msg)
+
     total_cells = len(track_prompts) * num_measures
     total_targeted = sum(len(tp["bars"]) for tp in track_prompts)
     if track_prompts and total_targeted >= total_cells:

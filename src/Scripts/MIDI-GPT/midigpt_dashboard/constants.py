@@ -50,7 +50,7 @@ MODEL_DIM_OPTIONS = {
 }
 
 # Which Core-tab per-track attribute controls actually take effect for a
-# track's role under a given model. REAPER_midigpt_infill.py's
+# track's role under a given model. MIDI-GPT Generate.py's
 # _compute_track_prompt_fields() already silently drops anything outside
 # this for "yellow" (e.g. a density limit set on a melodic track is just
 # never sent) -- this is the same mapping, used to hide the control in the

@@ -30,7 +30,9 @@
 
 set -uo pipefail  # no -e: one failed category shouldn't stop the rest
 
-REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+# This script lives in dev/ -- REPO_DIR resolves to the repo root (one
+# level up), which is what every path below actually means by it.
+REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ASSUME_YES=false
 for arg in "$@"; do
     case "$arg" in

@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # Update MIDI-GPT for REAPER to the latest version
-# Usage: ./update.sh
+# Usage: ./update.sh [any install.sh flag, e.g. --torch-gpu, --dev, --midigpt-src=PATH]
 
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
-VENV_DIR="$REPO_DIR/.venv"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -28,14 +27,24 @@ info "Pulling latest plugin code..."
 git -C "$REPO_DIR" pull || fail "git pull failed. Check your internet connection."
 ok "Plugin code up to date"
 
-# ── Activate venv ────────────────────────────────────────────────
-[ -f "$VENV_DIR/bin/activate" ] || fail "Virtual environment not found. Run install.sh first."
-source "$VENV_DIR/bin/activate"
-
-# ── Upgrade midigpt from PyPI ────────────────────────────────────
-info "Upgrading midigpt backend..."
-pip install --upgrade "midigpt[http,inference]" -q
-ok "midigpt upgraded to $(python -c 'import importlib.metadata; print(importlib.metadata.version("midigpt"))')"
+# ── Refresh the venv/backend via install.sh ──────────────────────
+# Reuses install.sh's own venv/backend logic (Steps 1-3, 6) instead of
+# duplicating a simplified version of it here -- this used to just run
+# `pip install --upgrade "midigpt[http,inference]"` unconditionally, which
+# is only correct for a PyPI install; for an editable/source install (a
+# sibling MIDI-GPT checkout, or install.sh's own clone-and-editable
+# fallback) it would silently try to replace that with a PyPI wheel
+# instead of updating the actual source. install.sh already knows which
+# of those this environment is using and updates it correctly.
+#
+# --backend-only skips every REAPER-side step (symlinks, ReaPack,
+# reaper.ini) entirely, so this never needs REAPER closed and never
+# re-asks the one-time Sforzando/Arachno questions; `< /dev/null` also
+# suppresses install.sh's own interactive "start the server now?" prompt
+# so only this script's copy of that question runs.
+[ -f "$REPO_DIR/install.sh" ] || fail "install.sh not found -- this checkout looks incomplete."
+info "Refreshing the Python venv/backend..."
+bash "$REPO_DIR/install.sh" --backend-only --skip-deps "$@" < /dev/null
 
 # ── Done ─────────────────────────────────────────────────────────
 echo ""

@@ -55,9 +55,9 @@ AI-powered multi-track MIDI generation plugin for [REAPER](https://www.reaper.fm
 MIDI-GPT for REAPER has two parts:
 
 1. **Inference Server** (`midigpt-http`) — Starts a stateless FastAPI server listening for generation requests on port `3456` (binds `0.0.0.0` by default, so it can run on a different machine than REAPER, e.g. a GPU workstation on the same network).
-2. **Dashboard** (`REAPER_midigpt_dashboard.py`) — The one window you interact with in REAPER: server address, track/SoundFont setup, global options, per-track controls (density, polyphony, key signature, pitch mask, remix, etc.), and a **Run Infill** button that reads your session, sends a generation payload to the server, and writes the result back into your project.
+2. **Dashboard** (`MIDI-GPT.py`) — The one window you interact with in REAPER: server address, track/SoundFont setup, global options, per-track controls (density, polyphony, key signature, pitch mask, remix, etc.), and a **Run Infill** button that reads your session, sends a generation payload to the server, and writes the result back into your project.
 
-The dashboard's buttons are thin wrappers around a handful of underlying scripts (`REAPER_midigpt_infill.py` does the actual generation call, `REAPER_midigpt_setup_tracks.py` does track setup, etc.) — you never need to run those directly, but you can load them as their own ReaScript actions too if you want keyboard-shortcut access to one of them without opening the dashboard. See [REAPER Setup](#reaper-setup).
+The dashboard's buttons are thin wrappers around a handful of underlying scripts (`MIDI-GPT Generate.py` does the actual generation call, `MIDI-GPT Setup Tracks.py` does track setup, etc.) — you never need to run those directly, but you can load them as their own ReaScript actions too if you want keyboard-shortcut access to one of them without opening the dashboard. See [REAPER Setup](#reaper-setup).
 
 The model sees your existing MIDI as context and generates new notes for the bars you select, producing results that fit musically with the surrounding material.
 
@@ -149,8 +149,8 @@ If you cloned this repo and want to link a local `MIDI-GPT` backend repository:
    * Open the Action List: **Actions > Show Action List** (or press `?`).
    * Click **New action**, then select **Load ReaScript...**.
    * Browse to: `~/Library/Application Support/REAPER/Scripts/MIDI-GPT/` (or `%APPDATA%\REAPER\Scripts\MIDI-GPT\` on Windows).
-   * Select **`REAPER_midigpt_dashboard.py`** and click Open. This is the only action you need — everything below is a button inside the window it opens.
-   * *(Optional)* The dashboard's buttons are wrappers around `REAPER_midigpt_infill.py`, `REAPER_midigpt_set_server.py`, `REAPER_midigpt_setup_tracks.py`, and `REAPER_midigpt_apply_soundfont_template.py`. Load any of those the same way if you want a keyboard shortcut for that one action specifically, without opening the dashboard — REAPER lists each as `Script: <filename>.py` in the Action List. Nothing about the dashboard requires this; it's purely a convenience for people who'd rather bind a hotkey than click a button.
+   * Select **`MIDI-GPT.py`** and click Open. This is the only action you need — everything below is a button inside the window it opens.
+   * *(Optional)* The dashboard's buttons are wrappers around `MIDI-GPT Generate.py`, `MIDI-GPT Set Server.py`, `MIDI-GPT Setup Tracks.py`, and `MIDI-GPT Replace Instruments.py`. Load any of those the same way if you want a keyboard shortcut for that one action specifically, without opening the dashboard — REAPER lists each as `Script: <filename>.py` in the Action List. Nothing about the dashboard requires this; it's purely a convenience for people who'd rather bind a hotkey than click a button.
 
 3. **Open the dashboard:** run the action you just loaded. The window has, top to bottom:
    * **Actions row** — the current server address and a **Change...** button next to it, a model picker (once the server responds), **Setup Tracks**, **Force Re-setup Selected Tracks**, **Run Infill**, and **Reset Global Options && Track Controls**.
@@ -247,7 +247,7 @@ To get useful results on empty tracks:
 
 ## Controls Reference
 
-All controls below live in the dashboard window (`REAPER_midigpt_dashboard.py`), saved per-project — you only need to set them once per session, not per generation run.
+All controls below live in the dashboard window (`MIDI-GPT.py`), saved per-project — you only need to set them once per session, not per generation run.
 
 ### Global Options
 
@@ -313,9 +313,20 @@ To run the full suite of unit and integration tests:
 
 ## Building a Release Package
 
-To package the plugin, scripts, installers, and documentation for release:
+Publishing a release is automated: push a version tag and CI builds the zip
+on a clean runner and opens a draft GitHub Release with it attached.
 
 ```bash
-./build_release.sh
+git tag vX.Y.Z
+git push origin vX.Y.Z
+```
+Review the draft (auto-generated notes, so worth a pass) and publish it from
+the GitHub UI, or `gh release edit vX.Y.Z --draft=false`.
+
+To build the zip locally without publishing anything (e.g. to sanity-check
+its contents), run the same script CI uses:
+
+```bash
+./dev/build_release.sh
 ```
 This generates a ZIP file named `MIDI-GPT-for-REAPER-[DATE].zip` in the repository root.

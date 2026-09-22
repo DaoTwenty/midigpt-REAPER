@@ -6,15 +6,6 @@ Clean extraction of MIDI content and measure masks from REAPER projects
 from typing import List, Tuple, Optional, Dict
 from reaper_python import *
 
-# Import existing helper modules if available
-try:
-    #import mytrackviewstuff as mt
-    #import mymidistuff as mm
-    HAS_HELPERS = True
-except ImportError:
-    HAS_HELPERS = False
-
-
 # --- Instrument Mapping Configuration ---
 # Maps track name patterns to MIDI instrument numbers (GM standard)
 INST_TO_MATCHING_STRINGS = {
@@ -169,20 +160,35 @@ def get_instrument_from_track_name(track_name: str) -> Optional[int]:
 
 class TimeSelection:
     """Represents a time selection in REAPER"""
-    
-    def __init__(self, start_time: float, end_time: float, start_measure: int, end_measure: int):
+
+    def __init__(self, start_time: float, end_time: float, start_measure: int, end_measure: int,
+                 start_slack: float = 0.0, end_slack: float = 0.0):
         self.start_time = start_time
         self.end_time = end_time
         self.start_measure = start_measure
         self.end_measure = end_measure
-    
+        # Seconds of "extra" bar pulled in on each side because the raw
+        # selection didn't land on a bar line -- extraction rounds outward
+        # (floor the start, ceil the end) to whole REAPER bars, so an
+        # off-grid selection ends up sending more context than the user
+        # actually selected. 0.0 when the edge already sat on a bar line
+        # (or there's no selection at all). See _get_time_selection().
+        self.start_slack = start_slack
+        self.end_slack = end_slack
+
     @property
     def has_selection(self) -> bool:
         return self.start_time != self.end_time
-    
+
     @property
     def duration(self) -> float:
         return self.end_time - self.start_time
+
+    @property
+    def is_bar_misaligned(self) -> bool:
+        """True if either edge of the selection didn't land on a bar line."""
+        EPS = 1e-3
+        return self.start_slack > EPS or self.end_slack > EPS
 
 
 class MIDINote:
@@ -495,12 +501,30 @@ class REAPERMIDIExtractor:
             end_measure = self.tempo_map.time_to_measure(end_time - EPS) + 1
         else:
             end_measure = 0
-        
+
+        # How far the raw selection edges sit from the bar lines extraction
+        # actually snapped to. Doesn't change what gets extracted (still
+        # floor-start/ceil-end to whole bars, same as always) -- just lets
+        # the caller warn the user their loop wasn't bar-aligned instead of
+        # silently sending more bars than they selected. Fixing the root
+        # cause (e.g. a song whose true downbeat is offset from REAPER's own
+        # bar 1) is a project-level call for the user, not something to
+        # guess at here.
+        start_slack = 0.0
+        end_slack = 0.0
+        if end_time > start_time:
+            snapped_start = self.tempo_map.measure_to_time(start_measure)
+            snapped_end = self.tempo_map.measure_to_time(end_measure)
+            start_slack = max(0.0, start_time - snapped_start)
+            end_slack = max(0.0, snapped_end - end_time)
+
         return TimeSelection(
             start_time=start_time,
             end_time=end_time,
             start_measure=start_measure,
-            end_measure=end_measure
+            end_measure=end_measure,
+            start_slack=start_slack,
+            end_slack=end_slack
         )
     
     def _build_tempo_map(self):

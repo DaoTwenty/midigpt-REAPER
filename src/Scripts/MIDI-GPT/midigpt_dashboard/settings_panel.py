@@ -14,7 +14,7 @@ def draw(ctx, window_center):
     """Draws the popup body if it's open. The caller is responsible for
     placing whatever button opens it and calling
     imgui.OpenPopup(ctx, SETTINGS_POPUP_ID) (see draw_logo_panel() in
-    REAPER_midigpt_dashboard.py)."""
+    MIDI-GPT.py)."""
     imgui.SetNextWindowPos(ctx, window_center[0], window_center[1], imgui.Cond_Appearing(), 0.5, 0.5)
     imgui.PushStyleVar(ctx, imgui.StyleVar_WindowPadding(), 16, 16)
     visible, _ = imgui.BeginPopupModal(ctx, SETTINGS_POPUP_ID, None, imgui.WindowFlags_AlwaysAutoResize())

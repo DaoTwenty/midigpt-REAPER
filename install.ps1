@@ -234,7 +234,7 @@ function Download-ReaImGui {
 
 # Downloads the Arachno GM SoundFont into this repo's own soundfonts\
 # folder (kept alongside the plugin, not scattered into REAPER's resource
-# dir), under its real filename -- REAPER_midigpt_setup_tracks.py reads
+# dir), under its real filename -- MIDI-GPT Setup Tracks.py reads
 # whatever .sf2 is actually there rather than a hardcoded name, so this
 # doesn't need to match anything else exactly. Arachno is freeware and this
 # is the exact .zip Arachnosoft's own download page links to (mirrored on
@@ -879,18 +879,18 @@ Write-Host "Next steps in REAPER:" -ForegroundColor White
 Write-Host ""
 Write-Host "  1. Load the ReaScript actions:"
 Write-Host "     Actions > Show Action List > Load ReaScript"
-Write-Host "     Select: $ReaperDir\Scripts\MIDI-GPT\REAPER_midigpt_dashboard.py   (primary UI)"
-Write-Host "     Select: $ReaperDir\Scripts\MIDI-GPT\REAPER_midigpt_infill.py"
-Write-Host "     Select: $ReaperDir\Scripts\MIDI-GPT\REAPER_midigpt_set_server.py"
-Write-Host "     Select: $ReaperDir\Scripts\MIDI-GPT\REAPER_midigpt_setup_tracks.py"
-Write-Host "     Select: $ReaperDir\Scripts\MIDI-GPT\REAPER_midigpt_apply_soundfont_template.py"
+Write-Host "     Select: $ReaperDir\Scripts\MIDI-GPT\MIDI-GPT.py   (primary UI)"
+Write-Host "     Select: $ReaperDir\Scripts\MIDI-GPT\MIDI-GPT Generate.py"
+Write-Host "     Select: $ReaperDir\Scripts\MIDI-GPT\MIDI-GPT Set Server.py"
+Write-Host "     Select: $ReaperDir\Scripts\MIDI-GPT\MIDI-GPT Setup Tracks.py"
+Write-Host "     Select: $ReaperDir\Scripts\MIDI-GPT\MIDI-GPT Replace Instruments.py"
 Write-Host ""
-Write-Host "  2. Run 'MIDI-GPT: Dashboard' — it's a single window for the whole"
+Write-Host "  2. Run 'MIDI-GPT.py' — it's a single window for the whole"
 Write-Host "     workflow (global options, per-track controls, running generation)."
 Write-Host "     Needs the ReaImGui extension -- see the warning above if it's missing."
 Write-Host ""
 Write-Host "  If the MIDI-GPT server runs on a different machine, run the"
-Write-Host "  'MIDI-GPT: Set server address' action and enter its IP/domain and port"
+Write-Host "  'MIDI-GPT Set Server.py' action and enter its IP/domain and port"
 Write-Host "  (e.g. http://192.168.1.20:3456). Defaults to http://127.0.0.1:3456."
 Write-Host ""
 Write-Host "To start the server:" -ForegroundColor White

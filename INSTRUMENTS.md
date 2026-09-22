@@ -1,6 +1,6 @@
 # Instrument Names
 
-MIDI-GPT uses General MIDI instrument names to identify tracks. **The track name is ground truth** — `REAPER_midigpt_infill.py` matches your track's name against the keyword list below (case-insensitive, substring match) to resolve it to one of the canonical instrument names shown in the table.
+MIDI-GPT uses General MIDI instrument names to identify tracks. **The track name is ground truth** — `MIDI-GPT Generate.py` matches your track's name against the keyword list below (case-insensitive, substring match) to resolve it to one of the canonical instrument names shown in the table.
 
 A track's MIDI content (channel 10 for drums, or an embedded Program Change event) is only used as a *fallback*, for a track whose name doesn't match any keyword — and it's what the dashboard's **Setup Tracks** action uses to auto-assign a name in the first place. Once a track has a resolved name, that name is what determines its instrument for generation, not whatever MIDI content happens to be on it. A track with no name match and no detectable MIDI content defaults to piano.
 
