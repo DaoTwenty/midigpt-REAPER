@@ -27,6 +27,10 @@
 #   .\install.ps1 -ReaperOnly                  # Only Step 4/5 (REAPER
 #                                                 integration) -- skips
 #                                                 venv/backend entirely
+#   .\install.ps1 -BackendOnly                 # Only venv/backend (Steps
+#                                                 1-3, 6) -- skips REAPER
+#                                                 integration entirely, so
+#                                                 REAPER never needs closing
 #   .\install.ps1 -TorchGpu                    # Install PyTorch with CUDA
 #   .\install.ps1 -Dev                         # Editable install for development
 #   .\install.ps1 -MidigptSrc C:\path\to\MIDI-GPT
@@ -36,6 +40,7 @@ param(
     [switch]$SkipDeps,
     [switch]$SkipReaperConfig,
     [switch]$ReaperOnly,
+    [switch]$BackendOnly,
     [switch]$TorchGpu,
     [switch]$Dev,
     [string]$MidigptSrc = "",
@@ -299,6 +304,9 @@ if ($Help) {
     Write-Host "  -ReaperOnly          Only do REAPER integration (Step 4/5: junction, ReaPack,"
     Write-Host "                       ReaImGui, reaper.ini) -- skips venv/backend entirely."
     Write-Host "                       Useful to redo just the REAPER side, or for testing."
+    Write-Host "  -BackendOnly         Only do venv/backend (Steps 1-3, 6) -- skips REAPER"
+    Write-Host "                       integration entirely, so it never needs REAPER closed."
+    Write-Host "                       What update.ps1 uses to refresh the backend in place."
     Write-Host "  -TorchGpu            Install PyTorch with GPU support (CUDA)."
     Write-Host "  -Dev                 Install plugin in editable mode for development."
     Write-Host "  -MidigptSrc PATH     Path to MIDI-GPT source repo (sibling folder by default)"
@@ -310,6 +318,7 @@ if ($Help) {
     Write-Host "  .\install.ps1 -Dev                         # Development install (editable)"
     Write-Host "  .\install.ps1 -MidigptSrc C:\path\to\MIDI-GPT  # Custom MIDI-GPT source path"
     Write-Host "  .\install.ps1 -ReaperOnly                  # Just (re)do REAPER integration"
+    Write-Host "  .\install.ps1 -BackendOnly                 # Just refresh venv/backend"
     exit 0
 }
 
@@ -551,6 +560,13 @@ if ($Dev) {
 
 } # ReaperOnly == false (Steps 1-3)
 
+# $ReaperWasClosedByUs is referenced unconditionally later (the ImGui
+# relaunch check) so it must be defined even under -BackendOnly, which
+# skips the block below that would otherwise set it.
+$ReaperWasClosedByUs = $false
+
+if (-not $BackendOnly) {
+
 # ====================================================================
 # Step 4: REAPER Integration (Scripts junction, ReaPack, ReaImGui)
 # ====================================================================
@@ -567,8 +583,6 @@ if ($env:MIDIGPT_REAPER_DIR) {
 } else {
     $ReaperDir = Join-Path $env:APPDATA "REAPER"
 }
-
-$ReaperWasClosedByUs = $false
 
 if (Test-Path $ReaperDir) {
     # Installing ReaPack and configuring reaper.ini (Step 5) both need
@@ -827,6 +841,8 @@ if ($NeedReaperForImGui) {
     }
 }
 
+} # BackendOnly == false (Steps 4-5)
+
 if (-not $ReaperOnly) {
 
 # ====================================================================
@@ -871,28 +887,36 @@ if (Test-Path $DesktopDir) {
 
 Write-Host ""
 Write-Host ("=" * 52) -ForegroundColor White
-Write-Host "  Installation Complete!" -ForegroundColor Green
+if ($BackendOnly) {
+    Write-Host "  Backend Updated!" -ForegroundColor Green
+} else {
+    Write-Host "  Installation Complete!" -ForegroundColor Green
+}
 Write-Host ("=" * 52) -ForegroundColor White
 Write-Host ""
 
+# $ReaperDir is only ever set inside the Step 4 block above, which
+# -BackendOnly skips entirely -- nothing below this point may reference it
+# (or anything else REAPER-side) unguarded.
+if (-not $BackendOnly) {
 Write-Host "Next steps in REAPER:" -ForegroundColor White
 Write-Host ""
-Write-Host "  1. Load the ReaScript actions:"
+Write-Host "  1. Load the dashboard as a ReaScript action:"
 Write-Host "     Actions > Show Action List > Load ReaScript"
-Write-Host "     Select: $ReaperDir\Scripts\MIDI-GPT\MIDI-GPT.py   (primary UI)"
-Write-Host "     Select: $ReaperDir\Scripts\MIDI-GPT\MIDI-GPT Generate.py"
-Write-Host "     Select: $ReaperDir\Scripts\MIDI-GPT\MIDI-GPT Set Server.py"
-Write-Host "     Select: $ReaperDir\Scripts\MIDI-GPT\MIDI-GPT Setup Tracks.py"
-Write-Host "     Select: $ReaperDir\Scripts\MIDI-GPT\MIDI-GPT Replace Instruments.py"
+Write-Host "     Select: $ReaperDir\Scripts\MIDI-GPT\MIDI-GPT.py"
 Write-Host ""
 Write-Host "  2. Run 'MIDI-GPT.py' — it's a single window for the whole"
 Write-Host "     workflow (global options, per-track controls, running generation)."
 Write-Host "     Needs the ReaImGui extension -- see the warning above if it's missing."
+Write-Host "     Worth binding it to a toolbar button or keyboard shortcut, since"
+Write-Host "     it's the only action you'll use day to day."
 Write-Host ""
 Write-Host "  If the MIDI-GPT server runs on a different machine, run the"
-Write-Host "  'MIDI-GPT Set Server.py' action and enter its IP/domain and port"
-Write-Host "  (e.g. http://192.168.1.20:3456). Defaults to http://127.0.0.1:3456."
+Write-Host "  'MIDI-GPT Set Server.py' action (load it the same way) and enter its"
+Write-Host "  IP/domain and port (e.g. http://192.168.1.20:3456). Defaults to"
+Write-Host "  http://127.0.0.1:3456."
 Write-Host ""
+} # BackendOnly == false (Next steps in REAPER)
 Write-Host "To start the server:" -ForegroundColor White
 if (Test-Path (Join-Path ([Environment]::GetFolderPath("Desktop")) "Start MIDI-GPT Server.lnk")) {
     Write-Host "  Double-click " -NoNewline
@@ -909,7 +933,9 @@ Write-Host ""
 # Interactive: Instrument setup (Sforzando + Arachno)
 # ====================================================================
 
-if (Test-Interactive) {
+# A one-time setup question, not something a -BackendOnly refresh
+# (update.ps1) should re-ask every single time it runs.
+if ((Test-Interactive) -and (-not $BackendOnly)) {
     Write-Host ""
     Write-Host ("-" * 52) -ForegroundColor White
     Write-Host "  Optional: Instrument Setup (Sforzando + Arachno)" -ForegroundColor White
@@ -944,7 +970,10 @@ if (Test-Interactive) {
 # Interactive: Launch server now?
 # ====================================================================
 
-if ((Test-Interactive) -and (-not $ReaperOnly)) {
+# MIDIGPT_SKIP_LAUNCH_PROMPT: set by update.ps1 while it calls this script
+# with -BackendOnly, so only update.ps1's own (more update-specific) copy
+# of this same question runs instead of both back to back.
+if ((Test-Interactive) -and (-not $ReaperOnly) -and (-not $env:MIDIGPT_SKIP_LAUNCH_PROMPT)) {
     Write-Host ""
     Write-Host ("-" * 52) -ForegroundColor White
     Write-Host "  Launch Server" -ForegroundColor White

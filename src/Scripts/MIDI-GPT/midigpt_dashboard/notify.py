@@ -13,6 +13,8 @@ reflexively dismiss it."""
 
 import imgui
 
+from . import themes
+
 ERROR_POPUP_ID = "Error##notify_error_popup"
 WARNING_POPUP_ID = "Warning##notify_warning_popup"
 
@@ -42,7 +44,7 @@ def draw(ctx, window_center):
         imgui.OpenPopup(ctx, popup_id)
         _shown_id = _message_id
 
-    for popup_id, accent in ((ERROR_POPUP_ID, 0xFF6666FF), (WARNING_POPUP_ID, 0xFFAA55FF)):
+    for popup_id, accent in ((ERROR_POPUP_ID, themes.error_color()), (WARNING_POPUP_ID, themes.warning_color())):
         imgui.SetNextWindowPos(ctx, window_center[0], window_center[1], imgui.Cond_Appearing(), 0.5, 0.5)
         imgui.PushStyleVar(ctx, imgui.StyleVar_WindowPadding(), 16, 16)
         visible, _ = imgui.BeginPopupModal(ctx, popup_id, None, imgui.WindowFlags_AlwaysAutoResize())

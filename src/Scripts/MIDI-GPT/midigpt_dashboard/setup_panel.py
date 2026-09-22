@@ -13,7 +13,7 @@ import imgui
 infill = importlib.import_module("MIDI-GPT Generate")
 setup_tracks = importlib.import_module("MIDI-GPT Setup Tracks")
 
-from . import hints, settings_panel
+from . import hints, settings_panel, themes
 
 _SERVER_POPUP_ID = "Set MIDI-GPT Server##server_popup"
 # Draft text for the server-URL popup's input field. Module-level rather
@@ -230,7 +230,7 @@ def _draw_track_options_popup(ctx, window_center):
             _wizard["error"] = None
             imgui.CloseCurrentPopup(ctx)
         if _wizard["error"]:
-            imgui.TextColored(ctx, 0xFF6666FF, _wizard["error"])
+            imgui.TextColored(ctx, themes.error_color(), _wizard["error"])
 
         imgui.EndPopup(ctx)
     return action

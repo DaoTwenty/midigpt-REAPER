@@ -2,7 +2,7 @@
 
 import imgui
 
-from . import hints
+from . import hints, themes
 
 _CANDIDATE_BUTTON_W = 28
 _CANDIDATE_BUTTON_H = 24
@@ -11,12 +11,6 @@ _CANDIDATE_BUTTON_H = 24
 # available height, the buttons no longer fit, and a second (vertical)
 # scrollbar kicks in to compensate, which looks broken.
 _CANDIDATE_ROW_H = 40
-_SELECTED_BUTTON_COLOR = 0x992E2EFF
-_CANCEL_BUTTON_COLOR = 0x992E2EFF
-# Distinct from the selected/cancel red so "this candidate errored" doesn't
-# read as "this is selected".
-_FAILED_BUTTON_COLOR = 0xAA4400FF
-_FAILED_TEXT_COLOR = 0xFFAA55FF
 
 
 def _draw_candidate_row(ctx, global_settings, logic):
@@ -48,7 +42,7 @@ def _draw_candidate_row(ctx, global_settings, logic):
         # (see the placeholder-slot case below) -- spell out that it
         # actually failed instead of relying on the hover tooltip.
         plural = "s" if failed_count != 1 else ""
-        imgui.TextColored(ctx, _FAILED_TEXT_COLOR,
+        imgui.TextColored(ctx, themes.warning_color(),
                            f"{failed_count} candidate{plural} failed -- hover a greyed button for why.")
     elif candidates:
         imgui.TextDisabled(ctx, "Batch candidates -- pick one to write it to REAPER.")
@@ -74,19 +68,24 @@ def _draw_candidate_row(ctx, global_settings, logic):
             is_selected = candidate is not None and selected == index
 
             if failed:
-                imgui.PushStyleColor(ctx, imgui.Col_Button(), _FAILED_BUTTON_COLOR)
+                # Pushing a fixed near-white text color alongside the
+                # danger/failed fill (not the theme's own Col_Text()) --
+                # see themes.py's module docstring for why.
+                imgui.PushStyleColor(ctx, imgui.Col_Button(), themes.failed())
+                imgui.PushStyleColor(ctx, imgui.Col_Text(), themes.DANGER_TEXT)
             if not enabled:
                 imgui.BeginDisabled(ctx)
             if is_selected:
-                imgui.PushStyleColor(ctx, imgui.Col_Button(), _SELECTED_BUTTON_COLOR)
+                imgui.PushStyleColor(ctx, imgui.Col_Button(), themes.danger())
+                imgui.PushStyleColor(ctx, imgui.Col_Text(), themes.DANGER_TEXT)
             if imgui.Button(ctx, f"{index + 1}##batch_{index}", _CANDIDATE_BUTTON_W, _CANDIDATE_BUTTON_H):
                 action = f"batch_select_{index}"
             if is_selected:
-                imgui.PopStyleColor(ctx, 1)
+                imgui.PopStyleColor(ctx, 2)
             if not enabled:
                 imgui.EndDisabled(ctx)
             if failed:
-                imgui.PopStyleColor(ctx, 1)
+                imgui.PopStyleColor(ctx, 2)
 
             if candidate is not None and imgui.IsItemHovered(ctx):
                 tip = f"seed {candidate.get('seed')}"
@@ -122,10 +121,11 @@ def draw(ctx, global_settings, logic=None):
     # clears and this reverts to Generate on its own; there's no separate
     # disabled/idle state to manage.
     if is_generating:
-        imgui.PushStyleColor(ctx, imgui.Col_Button(), _CANCEL_BUTTON_COLOR)
+        imgui.PushStyleColor(ctx, imgui.Col_Button(), themes.danger())
+        imgui.PushStyleColor(ctx, imgui.Col_Text(), themes.DANGER_TEXT)
     clicked = imgui.Button(ctx, "Cancel" if is_generating else "Generate", -1, 32)
     if is_generating:
-        imgui.PopStyleColor(ctx, 1)
+        imgui.PopStyleColor(ctx, 2)
     hints.show(ctx, "generation.generate")
     if clicked:
         action = "cancel" if is_generating else "generate"

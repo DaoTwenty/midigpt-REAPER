@@ -1,11 +1,20 @@
 #!/usr/bin/env bash
 # One-line installer for MIDI-GPT for REAPER
 # Usage: curl -fsSL https://raw.githubusercontent.com/Metacreation-Lab/midigpt-REAPER/main/bootstrap.sh | bash
+#
+# Env vars:
+#   MIDIGPT_REAPER_INSTALL_DIR  Where this plugin repo itself gets cloned
+#                               (default: ~/midigpt-REAPER). Rarely needed.
+#   MIDIGPT_DIR                 Path to a local MIDI-GPT (the model) source
+#                               checkout -- same as install.sh's own
+#                               --midigpt-src flag, just exposed as an env
+#                               var here since piping through `curl | bash`
+#                               makes passing a flag directly awkward.
 
 set -euo pipefail
 
 REPO_URL="https://github.com/Metacreation-Lab/midigpt-REAPER.git"
-INSTALL_DIR="${MIDIGPT_DIR:-$HOME/midigpt-REAPER}"
+INSTALL_DIR="${MIDIGPT_REAPER_INSTALL_DIR:-$HOME/midigpt-REAPER}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -41,10 +50,19 @@ fi
 echo -e "${GREEN}[OK]${NC} Repository ready at $INSTALL_DIR"
 echo ""
 
+# MIDIGPT_DIR (a local MIDI-GPT source checkout) maps to install.sh's own
+# --midigpt-src flag -- appended after any args this script was itself
+# called with, so `curl ... | bash -s -- --torch-gpu` style passthrough
+# still works too.
+EXTRA_ARGS=("$@")
+if [ -n "${MIDIGPT_DIR:-}" ]; then
+    EXTRA_ARGS+=("--midigpt-src=$MIDIGPT_DIR")
+fi
+
 # Hand off to the full installer. When piped from curl, stdin is the pipe
 # (not the terminal). Redirect from /dev/tty so interactive prompts work.
 if [ -t 0 ]; then
-    exec bash "$INSTALL_DIR/install.sh" "$@"
+    exec bash "$INSTALL_DIR/install.sh" "${EXTRA_ARGS[@]}"
 else
-    exec bash "$INSTALL_DIR/install.sh" "$@" < /dev/tty
+    exec bash "$INSTALL_DIR/install.sh" "${EXTRA_ARGS[@]}" < /dev/tty
 fi

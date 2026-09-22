@@ -44,49 +44,16 @@ import time
 import zlib
 
 from reaper_python import *
-from midi_extraction import INST_TO_MATCHING_STRINGS
+# GM_INTERNAL_NAMES/GM_NAME_TO_INSTRUMENT live in midi_extraction.py (also
+# needs them, for get_instrument_from_track_name()'s exact-name match) --
+# imported from there rather than duplicated here so the two can't drift.
+from midi_extraction import INST_TO_MATCHING_STRINGS, GM_INTERNAL_NAMES, GM_NAME_TO_INSTRUMENT
 
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 
 EXT_STATE_SECTION = "MIDI-GPT"
-
-# GM program 0-127 -> canonical name, exactly matching INSTRUMENTS.md.
-GM_INTERNAL_NAMES = [
-    "acoustic_grand_piano", "bright_acoustic_piano", "electric_grand_piano", "honky_tonk_piano",
-    "electric_piano_1", "electric_piano_2", "harpsichord", "clavi",
-    "celesta", "glockenspiel", "music_box", "vibraphone",
-    "marimba", "xylophone", "tubular_bells", "dulcimer",
-    "drawbar_organ", "percussive_organ", "rock_organ", "church_organ",
-    "reed_organ", "accordion", "harmonica", "tango_accordion",
-    "acoustic_guitar_nylon", "acoustic_guitar_steel", "electric_guitar_jazz", "electric_guitar_clean",
-    "electric_guitar_muted", "overdriven_guitar", "distortion_guitar", "guitar_harmonics",
-    "acoustic_bass", "electric_bass_finger", "electric_bass_pick", "fretless_bass",
-    "slap_bass_1", "slap_bass_2", "synth_bass_1", "synth_bass_2",
-    "violin", "viola", "cello", "contrabass",
-    "tremolo_strings", "pizzicato_strings", "orchestral_harp", "timpani",
-    "string_ensemble_1", "string_ensemble_2", "synth_strings_1", "synth_strings_2",
-    "choir_aahs", "voice_oohs", "synth_voice", "orchestra_hit",
-    "trumpet", "trombone", "tuba", "muted_trumpet",
-    "french_horn", "brass_section", "synth_brass_1", "synth_brass_2",
-    "soprano_sax", "alto_sax", "tenor_sax", "baritone_sax",
-    "oboe", "english_horn", "bassoon", "clarinet",
-    "piccolo", "flute", "recorder", "pan_flute",
-    "blown_bottle", "shakuhachi", "whistle", "ocarina",
-    "lead_1_square", "lead_2_sawtooth", "lead_3_calliope", "lead_4_chiff",
-    "lead_5_charang", "lead_6_voice", "lead_7_fifths", "lead_8_bass__lead",
-    "pad_1_new_age", "pad_2_warm", "pad_3_polysynth", "pad_4_choir",
-    "pad_5_bowed", "pad_6_metallic", "pad_7_halo", "pad_8_sweep",
-    "fx_1_rain", "fx_2_soundtrack", "fx_3_crystal", "fx_4_atmosphere",
-    "fx_5_brightness", "fx_6_goblins", "fx_7_echoes", "fx_8_sci_fi",
-    "sitar", "banjo", "shamisen", "koto",
-    "kalimba", "bag_pipe", "fiddle", "shanai",
-    "tinkle_bell", "agogo", "steel_drums", "woodblock",
-    "taiko_drum", "melodic_tom", "synth_drum", "reverse_cymbal",
-    "guitar_fret_noise", "breath_noise", "seashore", "bird_tweet",
-    "telephone_ring", "helicopter", "applause", "gunshot",
-]
 
 # ---------------------------------------------------------------------------
 # Fully-automatic Sforzando+Arachno instrument generation -- no template
@@ -185,14 +152,27 @@ ARACHNO_DRUM_KIT = (128, 0, "Standard Drum Kit")
 
 def _sanitize_aria_name(name):
     """Aria's own name sanitizer, as used in its SoundFont/preset slot
-    references. Confirmed against the one real captured example: space and
-    '.' become '_' (e.g. 'Grand Piano' -> 'Grand_Piano', and the SoundFont
-    filename 'Arachno SoundFont - Version 1.0.sf2' ->
+    references -- confirmed against two real captured examples now: space
+    and '.' become '_' (e.g. 'Grand Piano' -> 'Grand_Piano', and the
+    SoundFont filename 'Arachno SoundFont - Version 1.0.sf2' ->
     'Arachno_SoundFont_-_Version_1_0_sf2' -- note the literal '-' survives
-    unchanged). Unconfirmed for the ~6 Arachno preset names with '&', '(',
-    ')', '/' -- if one of those specific instruments doesn't sound right,
-    that's the first thing to check."""
-    return name.replace(" ", "_").replace(".", "_")
+    unchanged); '&' survives as a literal '&' in the *name itself*, but
+    gets XML-entity-escaped to '&amp;' (captured from a real project after
+    program 87, "Bass & Lead", loaded with no preset selected in Sforzando
+    -- an unresolvable slot name just leaves the instrument on nothing, no
+    error anywhere -- the real slot name is
+    '.../087_Bass_&amp;_Lead', i.e. XML escaping because this string is
+    embedded straight into _ARIA_XML_TEMPLATE's name="..." attribute, not
+    a special case of Aria's own sanitizer).
+
+    An earlier version of this also mapped '(' and ')' to '_', guessed
+    (wrongly, per the above) at the same time as the '&' fix -- reverted,
+    since '(' / ')' aren't XML-special and there's no evidence they need
+    any transformation at all. Only 3 of the 128 melodic Arachno names
+    contain any of '&'/'('/')' ('Dulcimer (Santur)' at 15, 'Bass & Lead' at
+    87, 'Fantasia (New Age)' at 88) -- if 15 or 88 still don't sound right,
+    that's still genuinely unconfirmed and worth capturing for real."""
+    return name.replace(" ", "_").replace(".", "_").replace("&", "&amp;")
 
 def _find_arachno_sf2_name():
     """The exact filename of the Arachno SoundFont install.sh downloads
@@ -295,9 +275,6 @@ def gm_internal_name(instrument):
     if 0 <= instrument < len(GM_INTERNAL_NAMES):
         return GM_INTERNAL_NAMES[instrument]
     return f"program_{instrument}"
-
-GM_NAME_TO_INSTRUMENT = {name: i for i, name in enumerate(GM_INTERNAL_NAMES)}
-GM_NAME_TO_INSTRUMENT["drums"] = 128
 
 # ---------------------------------------------------------------------------
 # Instrument detection (from MIDI content, not track name)

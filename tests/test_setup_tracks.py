@@ -93,12 +93,25 @@ class TestSanitizeAriaName:
             == "Arachno_SoundFont_-_Version_1_0_sf2"
         )
 
+    def test_ampersand_is_xml_escaped_not_replaced(self):
+        """Confirmed against a second real captured example: the raw FX
+        chunk from a real project, decoded, gave the real slot name
+        '.../087_Bass_&amp;_Lead' for program 87 ("Bass & Lead"). '&'
+        survives as a literal '&' in the name -- it's XML-escaped to
+        '&amp;' because the sanitized string is embedded straight into an
+        XML attribute value, not because Aria's own sanitizer treats '&'
+        like space/period."""
+        assert setup_tracks._sanitize_aria_name("Bass & Lead") == "Bass_&amp;_Lead"
+
     def test_unconfirmed_characters_pass_through(self):
-        # '&', '(', ')', '/' are unconfirmed against a real Aria example --
-        # this just documents/pins current (pass-through) behavior so a
-        # future change here is a deliberate choice, not a silent drift.
+        # '(' / ')' aren't XML-special and there's no evidence (unlike '&')
+        # that Aria's sanitizer -- or XML escaping -- touches them at all;
+        # '/' doesn't appear in any of the 128 real Arachno melodic names
+        # either. Both still pass-through, still unconfirmed. Pins current
+        # behavior so a future change here is deliberate, not a silent
+        # drift.
         assert setup_tracks._sanitize_aria_name("Dulcimer (Santur)") == "Dulcimer_(Santur)"
-        assert setup_tracks._sanitize_aria_name("Bass & Lead") == "Bass_&_Lead"
+        assert setup_tracks._sanitize_aria_name("Fantasia (New Age)") == "Fantasia_(New_Age)"
         assert setup_tracks._sanitize_aria_name("TR-808/909 Drum Kit") == "TR-808/909_Drum_Kit"
 
 
@@ -133,11 +146,22 @@ class TestFindArachnoSf2Name:
 
 class TestArachnoSlotName:
     def test_matches_real_captured_reference(self, fake_soundfonts_dir):
-        # This is the one fully-confirmed reference string, captured from a
-        # real Sforzando+Arachno FX chunk with GM program 0 selected.
+        # This is a fully-confirmed reference string, captured from a real
+        # Sforzando+Arachno FX chunk with GM program 0 selected.
         assert (
             setup_tracks._arachno_slot_name(0, 0, "Grand Piano")
             == "sf2/Arachno_SoundFont_-_Version_1_0_sf2/000/000_Grand_Piano"
+        )
+
+    def test_matches_real_captured_reference_with_ampersand(self, fake_soundfonts_dir):
+        # A second fully-confirmed reference string, captured from a real
+        # user's project (program 87, "Bass & Lead") after it loaded with
+        # no preset selected -- decoding the actual FX chunk showed Aria's
+        # real slot name XML-escapes '&' to '&amp;' rather than replacing
+        # it with '_'.
+        assert (
+            setup_tracks._arachno_slot_name(0, 87, "Bass & Lead")
+            == "sf2/Arachno_SoundFont_-_Version_1_0_sf2/000/087_Bass_&amp;_Lead"
         )
 
     def test_bank_and_program_are_zero_padded_three_digits(self, fake_soundfonts_dir):

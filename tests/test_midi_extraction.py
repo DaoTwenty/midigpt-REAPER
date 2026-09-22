@@ -16,6 +16,7 @@ from midi_extraction import (
     TempoMap,
     TrackInfo,
     TimeSelection,
+    GM_INTERNAL_NAMES,
     get_instrument_from_track_name,
 )
 
@@ -312,6 +313,37 @@ class TestInstrumentMapping:
 
     def test_organ(self):
         assert get_instrument_from_track_name("Organ") == 16
+
+    def test_every_canonical_name_round_trips_to_its_own_program(self):
+        """The exact-match pass must win over the substring keyword search
+        for every one of the 128 canonical GM names -- regression coverage
+        for the bug where e.g. "bassoon" (program 70) used to resolve to
+        electric_bass_pick (34) because "bassoon" contains "bass"."""
+        for program, name in enumerate(GM_INTERNAL_NAMES):
+            assert get_instrument_from_track_name(name) == program, name
+        assert get_instrument_from_track_name("drums") == 128
+
+    def test_canonical_name_matches_with_spaces_or_hyphens_too(self):
+        """A track named with spaces (REAPER's norm) or hyphens should
+        still hit the exact-match pass, not just the literal underscored
+        form."""
+        assert get_instrument_from_track_name("Baritone Sax") == 67
+        assert get_instrument_from_track_name("baritone-sax") == 67
+        assert get_instrument_from_track_name("  Alto Sax  ") == 65
+
+    def test_previously_broken_substring_collisions_now_resolve_correctly(self):
+        """Concrete cases the substring-only search used to get wrong."""
+        assert get_instrument_from_track_name("bassoon") == 70  # was 34 (bass)
+        assert get_instrument_from_track_name("muted_trumpet") == 59  # was 28 (mute)
+        assert get_instrument_from_track_name("melodic_tom") == 117  # was 128 (tom)
+        assert get_instrument_from_track_name("alto_sax") == 65  # was 64 (sax)
+
+    def test_informal_substring_names_still_work(self):
+        """The original substring-keyword behavior is untouched for names
+        that aren't an exact canonical match."""
+        assert get_instrument_from_track_name("my piano") == 0
+        assert get_instrument_from_track_name("PIANO chords") == 0
+        assert get_instrument_from_track_name("kick drum bus") == 128
 
 
 # ===================================================================

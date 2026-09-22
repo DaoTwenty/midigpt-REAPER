@@ -1,22 +1,8 @@
 """Dashboard Console and Information tabs."""
 
-import math
-import time
-
 import imgui
 
-# How fast the in-flight indicator pulses, in seconds per dim<->bright cycle.
-_PULSE_PERIOD = 1.5
-_PULSE_DIM = (0x30, 0x38, 0x58)
-_PULSE_BRIGHT = (0x70, 0x80, 0xC8)
-
-
-def _pulse_color():
-    """An RRGGBBAA int cycling smoothly between _PULSE_DIM and _PULSE_BRIGHT,
-    used to animate a frame background as an "it's alive" indicator."""
-    phase = (math.sin(2 * math.pi * time.time() / _PULSE_PERIOD) + 1) / 2
-    r, g, b = (int(dim + (bright - dim) * phase) for dim, bright in zip(_PULSE_DIM, _PULSE_BRIGHT))
-    return (r << 24) | (g << 16) | (b << 8) | 0xFF
+from . import themes
 
 
 def _draw_console(ctx, log_lines):
@@ -61,7 +47,7 @@ def _draw_information(ctx, logic):
         else:
             imgui.TextDisabled(ctx, "No request yet.")
         if info["tokens"].get("truncated"):
-            imgui.TextColored(ctx, 0xFF6666FF, "Truncated -- hit the context limit.")
+            imgui.TextColored(ctx, themes.error_color(), "Truncated -- hit the context limit.")
 
         imgui.TableSetColumnIndex(ctx, 1)
         imgui.SeparatorText(ctx, "Result")
@@ -102,7 +88,7 @@ def _draw_information(ctx, logic):
         # background between two brightness levels instead, purely as an
         # "it's alive" indicator (the Cancel button lives on the Generate
         # button itself -- generation_panel.py).
-        imgui.PushStyleColor(ctx, imgui.Col_FrameBg(), _pulse_color())
+        imgui.PushStyleColor(ctx, imgui.Col_FrameBg(), themes.pulse_color())
         imgui.ProgressBar(ctx, 0.0, -1, 0, status_text)
         imgui.PopStyleColor(ctx, 1)
         imgui.TextDisabled(ctx, "Context: --")

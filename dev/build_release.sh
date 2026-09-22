@@ -91,6 +91,11 @@ python3 "$SCRIPT_DIR/build_docs.py"
 cp "$SCRIPT_DIR/README.md" "$RELEASE_DIR/"
 mkdir -p "$RELEASE_DIR/docs"
 cp "$SCRIPT_DIR/docs/index.html" "$RELEASE_DIR/docs/"
+# docs/index.html's JS rewrites the README's logo URL to a relative
+# "assets/logo.svg" path so it works offline (file://) -- without actually
+# copying docs/assets/ too, that image (and the dashboard screenshot) is
+# broken in every shipped release.
+cp -R "$SCRIPT_DIR/docs/assets" "$RELEASE_DIR/docs/"
 
 # ── Source: Scripts (REAPER script, extraction) ──
 mkdir -p "$RELEASE_DIR/src/Scripts/MIDI-GPT"

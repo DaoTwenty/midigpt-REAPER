@@ -141,6 +141,49 @@ INST_TO_MATCHING_STRINGS = {
     # GM drums on channel "10" (channel 9 in 0-based indexing)
 }
 
+# GM program 0-127 -> canonical name, exactly matching INSTRUMENTS.md. Lives
+# here (not in "MIDI-GPT Setup Tracks.py", which uses it too) because
+# get_instrument_from_track_name() below needs it, and this module is the
+# lower layer -- Setup Tracks already imports INST_TO_MATCHING_STRINGS from
+# here, so importing GM_INTERNAL_NAMES/GM_NAME_TO_INSTRUMENT the same
+# direction avoids a circular import.
+GM_INTERNAL_NAMES = [
+    "acoustic_grand_piano", "bright_acoustic_piano", "electric_grand_piano", "honky_tonk_piano",
+    "electric_piano_1", "electric_piano_2", "harpsichord", "clavi",
+    "celesta", "glockenspiel", "music_box", "vibraphone",
+    "marimba", "xylophone", "tubular_bells", "dulcimer",
+    "drawbar_organ", "percussive_organ", "rock_organ", "church_organ",
+    "reed_organ", "accordion", "harmonica", "tango_accordion",
+    "acoustic_guitar_nylon", "acoustic_guitar_steel", "electric_guitar_jazz", "electric_guitar_clean",
+    "electric_guitar_muted", "overdriven_guitar", "distortion_guitar", "guitar_harmonics",
+    "acoustic_bass", "electric_bass_finger", "electric_bass_pick", "fretless_bass",
+    "slap_bass_1", "slap_bass_2", "synth_bass_1", "synth_bass_2",
+    "violin", "viola", "cello", "contrabass",
+    "tremolo_strings", "pizzicato_strings", "orchestral_harp", "timpani",
+    "string_ensemble_1", "string_ensemble_2", "synth_strings_1", "synth_strings_2",
+    "choir_aahs", "voice_oohs", "synth_voice", "orchestra_hit",
+    "trumpet", "trombone", "tuba", "muted_trumpet",
+    "french_horn", "brass_section", "synth_brass_1", "synth_brass_2",
+    "soprano_sax", "alto_sax", "tenor_sax", "baritone_sax",
+    "oboe", "english_horn", "bassoon", "clarinet",
+    "piccolo", "flute", "recorder", "pan_flute",
+    "blown_bottle", "shakuhachi", "whistle", "ocarina",
+    "lead_1_square", "lead_2_sawtooth", "lead_3_calliope", "lead_4_chiff",
+    "lead_5_charang", "lead_6_voice", "lead_7_fifths", "lead_8_bass__lead",
+    "pad_1_new_age", "pad_2_warm", "pad_3_polysynth", "pad_4_choir",
+    "pad_5_bowed", "pad_6_metallic", "pad_7_halo", "pad_8_sweep",
+    "fx_1_rain", "fx_2_soundtrack", "fx_3_crystal", "fx_4_atmosphere",
+    "fx_5_brightness", "fx_6_goblins", "fx_7_echoes", "fx_8_sci_fi",
+    "sitar", "banjo", "shamisen", "koto",
+    "kalimba", "bag_pipe", "fiddle", "shanai",
+    "tinkle_bell", "agogo", "steel_drums", "woodblock",
+    "taiko_drum", "melodic_tom", "synth_drum", "reverse_cymbal",
+    "guitar_fret_noise", "breath_noise", "seashore", "bird_tweet",
+    "telephone_ring", "helicopter", "applause", "gunshot",
+]
+GM_NAME_TO_INSTRUMENT = {name: i for i, name in enumerate(GM_INTERNAL_NAMES)}
+GM_NAME_TO_INSTRUMENT["drums"] = 128
+
 
 def get_instrument_from_track_name(track_name: str) -> Optional[int]:
     """
@@ -149,6 +192,19 @@ def get_instrument_from_track_name(track_name: str) -> Optional[int]:
     callers fall back to MIDI-content detection, then finally to piano.
     """
     track_name_lower = track_name.lower()
+
+    # An exact match against one of the canonical GM instrument names (see
+    # GM_INTERNAL_NAMES / INSTRUMENTS.md's own table) always wins over the
+    # substring keyword search below. Without this, naming a track exactly
+    # what INSTRUMENTS.md tells you to name it could resolve to the WRONG
+    # instrument whenever that name happens to contain a different, lower-
+    # numbered instrument's keyword as a substring -- e.g. "bassoon"
+    # contains "bass" (instrument 34's keyword), so it used to resolve to
+    # electric_bass_pick instead of bassoon (70).
+    normalized = "_".join(track_name_lower.split()).replace("-", "_")
+    exact_match = GM_NAME_TO_INSTRUMENT.get(normalized)
+    if exact_match is not None:
+        return exact_match
 
     for inst_num, patterns in INST_TO_MATCHING_STRINGS.items():
         for pattern in patterns:
