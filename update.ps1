@@ -1,6 +1,6 @@
 # ============================================================================
 # Update MIDI-GPT for REAPER to the latest version (Windows / PowerShell)
-# Usage: .\update.ps1 [any install.ps1 flag, e.g. -TorchGpu, -Dev, -MidigptSrc PATH]
+# Usage: .\update.ps1 [any install.ps1 flag, e.g. -TorchGpu, -MidigptSrc PATH]
 # ============================================================================
 
 $ErrorActionPreference = "Continue"

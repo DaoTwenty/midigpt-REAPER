@@ -124,7 +124,6 @@ After installing, load the dashboard into REAPER once:
 | `--reaper-only` | `-ReaperOnly` | Only do REAPER integration (symlinks/junction, ReaPack, ReaImGui, `reaper.ini`) — skips the venv/backend entirely |
 | `--backend-only` | `-BackendOnly` | Only do the venv/backend — skips REAPER integration entirely, so REAPER never needs to be closed. What `update.sh`/`update.ps1` use under the hood |
 | `--torch-gpu` | `-TorchGpu` | Install PyTorch with GPU support (CUDA on Linux/Windows; macOS MPS is already in the default wheel) |
-| `--dev` | `-Dev` | Editable install (`-e`) for development |
 | `--midigpt-src=PATH` | `-MidigptSrc PATH` | Path to a local MIDI-GPT source checkout (sibling folder by default) |
 
 ### Updating / Uninstalling

@@ -32,7 +32,6 @@
 #                                                 integration entirely, so
 #                                                 REAPER never needs closing
 #   .\install.ps1 -TorchGpu                    # Install PyTorch with CUDA
-#   .\install.ps1 -Dev                         # Editable install for development
 #   .\install.ps1 -MidigptSrc C:\path\to\MIDI-GPT
 # ============================================================================
 
@@ -42,7 +41,6 @@ param(
     [switch]$ReaperOnly,
     [switch]$BackendOnly,
     [switch]$TorchGpu,
-    [switch]$Dev,
     [string]$MidigptSrc = "",
     [switch]$Help
 )
@@ -308,14 +306,12 @@ if ($Help) {
     Write-Host "                       integration entirely, so it never needs REAPER closed."
     Write-Host "                       What update.ps1 uses to refresh the backend in place."
     Write-Host "  -TorchGpu            Install PyTorch with GPU support (CUDA)."
-    Write-Host "  -Dev                 Install plugin in editable mode for development."
     Write-Host "  -MidigptSrc PATH     Path to MIDI-GPT source repo (sibling folder by default)"
     Write-Host "  -Help                Show this help"
     Write-Host ""
     Write-Host "Examples:"
     Write-Host "  .\install.ps1                              # Full installation (CPU torch)"
     Write-Host "  .\install.ps1 -TorchGpu                    # Full installation with GPU torch"
-    Write-Host "  .\install.ps1 -Dev                         # Development install (editable)"
     Write-Host "  .\install.ps1 -MidigptSrc C:\path\to\MIDI-GPT  # Custom MIDI-GPT source path"
     Write-Host "  .\install.ps1 -ReaperOnly                  # Just (re)do REAPER integration"
     Write-Host "  .\install.ps1 -BackendOnly                 # Just refresh venv/backend"
@@ -545,17 +541,6 @@ if ($LASTEXITCODE -eq 0) {
     Write-OK "midigpt backend installed successfully"
 } else {
     Write-Fail "midigpt backend installation failed."
-}
-
-Write-Info "Installing plugin dependencies..."
-if ($Dev) {
-    pip install -e $RepoDir -q 2>$null
-    if ($LASTEXITCODE -ne 0) { pip install -e $RepoDir }
-    Write-OK "Plugin dependencies installed (editable mode)"
-} else {
-    pip install $RepoDir -q 2>$null
-    if ($LASTEXITCODE -ne 0) { pip install $RepoDir }
-    Write-OK "Plugin dependencies installed"
 }
 
 } # ReaperOnly == false (Steps 1-3)

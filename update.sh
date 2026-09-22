@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Update MIDI-GPT for REAPER to the latest version
-# Usage: ./update.sh [any install.sh flag, e.g. --torch-gpu, --dev, --midigpt-src=PATH]
+# Usage: ./update.sh [any install.sh flag, e.g. --torch-gpu, --midigpt-src=PATH]
 
 set -euo pipefail
 

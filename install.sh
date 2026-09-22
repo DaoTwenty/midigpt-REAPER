@@ -22,7 +22,6 @@
 #   ./install.sh              # Full install
 #   ./install.sh --skip-deps  # Skip system dependency check (if already installed)
 #   ./install.sh --torch-gpu  # Install PyTorch with CUDA/MPS support
-#   ./install.sh --dev        # Editable install for development
 #   ./install.sh --reaper-only  # Only REAPER integration (symlinks, ReaPack, ReaImGui, reaper.ini)
 #   ./install.sh --help       # Show help
 # ============================================================================
@@ -333,7 +332,6 @@ except Exception:
 REAPER_ONLY=false
 BACKEND_ONLY=false
 TORCH_GPU=false
-DEV_MODE=false
 
 for arg in "$@"; do
     case "$arg" in
@@ -342,7 +340,6 @@ for arg in "$@"; do
         --reaper-only) REAPER_ONLY=true ;;
         --backend-only) BACKEND_ONLY=true ;;
         --torch-gpu) TORCH_GPU=true ;;
-        --dev) DEV_MODE=true ;;
         --midigpt-src=*)
             MIDIGPT_SRC="${arg#*=}"
             ;;
@@ -362,14 +359,12 @@ for arg in "$@"; do
             echo "                       What update.sh uses to refresh the backend in place."
             echo "  --torch-gpu          Install PyTorch with GPU support (CUDA on Linux/Windows,"
             echo "                       MPS on macOS is included in default wheel)."
-            echo "  --dev                Install plugin in editable mode (-e) for development."
             echo "  --midigpt-src=PATH   Path to the MIDI-GPT source repository (sibling folder by default)"
             echo "  --help               Show this help"
             echo ""
             echo "Examples:"
             echo "  ./install.sh                                   # Full installation (CPU torch)"
             echo "  ./install.sh --torch-gpu                       # Full installation with GPU torch"
-            echo "  ./install.sh --dev                             # Development install (editable)"
             echo "  ./install.sh --midigpt-src=/custom/path        # Custom MIDI-GPT source path"
             echo "  ./install.sh --reaper-only                     # Just (re)do REAPER integration"
             echo "  ./install.sh --backend-only                    # Just refresh venv/backend"
@@ -644,15 +639,6 @@ if python -c "from midigpt.inference.engine import InferenceEngine" 2>/dev/null;
     ok "midigpt backend installed successfully"
 else
     fail "midigpt backend installation failed."
-fi
-
-info "Installing plugin dependencies..."
-if [ "$DEV_MODE" = true ]; then
-    pip install -e "$REPO_DIR" -q 2>/dev/null || pip install -e "$REPO_DIR"
-    ok "Plugin dependencies installed (editable mode)"
-else
-    pip install "$REPO_DIR" -q 2>/dev/null || pip install "$REPO_DIR"
-    ok "Plugin dependencies installed"
 fi
 
 fi # REAPER_ONLY == false (Steps 1-3)
