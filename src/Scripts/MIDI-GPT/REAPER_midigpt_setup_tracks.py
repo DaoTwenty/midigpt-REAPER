@@ -380,32 +380,42 @@ def pick_instrument_dropdown(track_name):
     )
     return GM_NAME_TO_INSTRUMENT.get(choice) if choice else None
 
-def resolve_track_instruments(tracks):
-    """Map track -> GM instrument number, reading real MIDI content first,
-    then falling back to the track's current name if it's already an exact
-    canonical instrument name (e.g. a blank track resolved on a previous
-    run -- it has no MIDI content to detect from, so without this check
-    it would be re-prompted on every single run forever). Tracks that still
-    can't be resolved (e.g. freshly-created tracks, or an imported file
-    where every track shares the file's name) are prompted for one-by-one.
+def detect_instruments(tracks):
+    """Map track -> GM instrument number (or None if undetected), reading
+    real MIDI content first, then falling back to the track's current name
+    if it's already an exact canonical instrument name (e.g. a blank track
+    resolved on a previous run -- it has no MIDI content to detect from, so
+    without this check it would be re-prompted on every single run
+    forever). Pure detection, no prompting -- see resolve_track_instruments
+    for the native-dialog fallback built on top of this, and the dashboard
+    (midigpt_dashboard/setup_panel.py) for the ReaImGui one."""
+    resolved = {}
+    for track in tracks:
+        instrument = detect_track_instrument(track)
+        if instrument is None:
+            instrument = GM_NAME_TO_INSTRUMENT.get((get_track_name(track) or "").strip())
+        resolved[track] = instrument
+    return resolved
 
-    On macOS this is the native dropdown list only -- cancelling it is a
+
+def resolve_track_instruments(tracks):
+    """detect_instruments(), then prompt one-by-one for whatever it
+    couldn't resolve (e.g. freshly-created tracks, or an imported file
+    where every track shares the file's name). Native-dialog only -- used
+    by this script's and REAPER_midigpt_apply_soundfont_template.py's own
+    standalone/hotkey entry points; the dashboard has its own ReaImGui
+    confirmation popup instead (see midigpt_dashboard/setup_panel.py) so it
+    isn't limited to the macOS-only picker below.
+
+    On macOS the fallback is the native dropdown list -- cancelling it is a
     deliberate 'skip this track' choice, so that track is just left
     unresolved rather than immediately re-prompted with a second, uglier
     dialog. The keyword-entry text dialog only ever appears on platforms
     without the native list picker, where it's the sole way to specify
     anything -- never as a fallback after a mac user already dismissed the
     list."""
-    resolved = {}
-    ambiguous = []
-    for track in tracks:
-        instrument = detect_track_instrument(track)
-        if instrument is None:
-            instrument = GM_NAME_TO_INSTRUMENT.get((get_track_name(track) or "").strip())
-        if instrument is not None:
-            resolved[track] = instrument
-        else:
-            ambiguous.append(track)
+    resolved = detect_instruments(tracks)
+    ambiguous = [track for track in tracks if resolved[track] is None]
 
     has_native_picker = platform.system() == "Darwin"
     still_ambiguous = []
@@ -542,17 +552,21 @@ def ensure_instrument(track, instrument, source_pool):
 # Main Workflow
 # ---------------------------------------------------------------------------
 
-def run_setup_tracks():
-    RPR_ClearConsole()
+def apply_track_setup(tracks, instruments, name_only=False, replace_existing=False):
+    """Rename (and, unless name_only, instrument) `tracks` per the final
+    track -> GM instrument choices in `instruments` (None = leave that
+    track's instrument unresolved/untouched). Pure "do it" step, no
+    detection or prompting of its own -- callers (run_setup_tracks below,
+    REAPER_midigpt_apply_soundfont_template.py, and the dashboard's
+    ReaImGui wizard) are responsible for arriving at `instruments` first.
 
-    num_tracks = RPR_CountTracks(0)
-    tracks = [RPR_GetTrack(0, i) for i in range(num_tracks)]
-    if not tracks:
-        print("No tracks in project.\n")
-        return
-
+    name_only=True never touches FX at all, even on a track that already
+    has an instrument -- it only renames. replace_existing=True deletes
+    whatever instrument FX is already on a track before adding a fresh
+    one (REAPER_midigpt_apply_soundfont_template.py's "force" behavior);
+    False (the default) leaves a track that already has an instrument
+    alone, same as ensure_instrument's own ownership-respecting check."""
     print(f"Configuring {len(tracks)} track(s)...\n")
-    instruments = resolve_track_instruments(tracks)
 
     source_pool = {}
     RPR_Undo_BeginBlock()
@@ -562,15 +576,36 @@ def run_setup_tracks():
             if instrument is not None:
                 set_track_name(track, gm_internal_name(instrument))
             name = get_track_name(track) or "(unnamed)"
+            instrument_note = f"instrument: {gm_internal_name(instrument)}" if instrument is not None else "instrument: unresolved"
+
+            if name_only:
+                print(f"{name}: name only; {instrument_note}")
+                continue
+
+            if replace_existing:
+                existing_fx = RPR_TrackFX_GetInstrument(track)
+                if existing_fx >= 0:
+                    RPR_TrackFX_Delete(track, existing_fx)
 
             inst_result = ensure_instrument(track, instrument, source_pool)
-            instrument_note = f"instrument: {gm_internal_name(instrument)}" if instrument is not None else "instrument: unresolved"
             print(f"{name}: {inst_result}; {instrument_note}")
     finally:
         cleanup_instrument_sources(source_pool)
     RPR_Undo_EndBlock("MIDI-GPT: Setup tracks", -1)
 
     print("\nDone.\n")
+
+def run_setup_tracks():
+    RPR_ClearConsole()
+
+    num_tracks = RPR_CountTracks(0)
+    tracks = [RPR_GetTrack(0, i) for i in range(num_tracks)]
+    if not tracks:
+        print("No tracks in project.\n")
+        return
+
+    instruments = resolve_track_instruments(tracks)
+    apply_track_setup(tracks, instruments, name_only=False, replace_existing=False)
 
 if __name__ == "__main__":
     run_setup_tracks()

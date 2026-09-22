@@ -12,7 +12,6 @@ On every run:
 """
 
 import sys
-import copy
 import json
 import time
 import uuid
@@ -35,6 +34,25 @@ DEFAULT_SERVER_URL = "http://127.0.0.1:3456"
 EXT_STATE_SECTION = "MIDI-GPT"
 EXT_STATE_KEY = "server_url"
 EXT_STATE_MODEL_KEY = "selected_model"
+
+# The concise reason prepare_generation()/finish_generation() most recently
+# returned None (or, for a batch, wrote nothing back) -- read by
+# logic.py right after to show the *actual* error in a popup instead of a
+# generic "check the Console tab" one. Both functions only ever run
+# synchronously on the main thread (see their own docstrings), and every
+# failure path sets this immediately before returning, so there's no
+# concurrent-write risk and no chance of a caller reading a stale value
+# left over from some earlier, unrelated call.
+_last_error = None
+
+
+def last_error():
+    return _last_error
+
+
+def _record_error(message):
+    global _last_error
+    _last_error = message
 
 def get_server_url():
     """Server address, configurable via the 'MIDI-GPT: Set server address'
@@ -482,7 +500,6 @@ def get_track_prompts(num_measures: int, model_type: str, extraction):
 
         guid = _get_track_guid(track)
         v = dashboard_track_params.get(guid, {})
-        source = "dashboard" if guid in dashboard_track_params else "default"
         attrs, bar_attrs, is_ar, is_ignored = _compute_track_prompt_fields(
             model_type, is_drum_track, v)
         track_controls = _compute_track_controls(v)
@@ -510,16 +527,18 @@ def get_track_prompts(num_measures: int, model_type: str, extraction):
             if bar_attrs and bars_to_gen else {}
         )
 
+        # Plain-English per-track summary -- what's actually about to
+        # happen to it, not the internal fields that decided it (those are
+        # still in the returned dict below for anything that needs them).
         if is_ignored:
-            role = "IGNORE"
+            role = "ignored"
         elif is_ar:
-            role = f"AR (all {num_measures} bars)"
+            role = f"autoregressive -- regenerating all {num_measures} bars"
         elif bars_to_gen:
-            role = f"INFILL bars={bars_to_gen}"
+            role = f"generating bar(s) {', '.join(str(b) for b in bars_to_gen)}"
         else:
-            role = "CONTEXT only"
-        controls_note = f", controls={json.dumps(track_controls)}" if track_controls else ""
-        print(f"  Track {i} ({track_info.track_name}): {role}  [source: {source}, ignore={is_ignored}, autoregressive={is_ar}{controls_note}]\n")
+            role = "context only (not modified)"
+        print(f"  {track_info.track_name}: {role}")
 
         tracks_prompts.append({
             "id": i,
@@ -606,17 +625,6 @@ def song_to_score_dict(song: MIDISongByMeasure, resolution: int) -> dict:
         "tracks": tracks
     }
 
-def _redact_score_notes(score_dict: dict) -> dict:
-    """Deep-copies score_dict for logging, replacing each bar's note list
-    with a placeholder string so the console log shows full request
-    structure without dumping every note's pitch/velocity/tick data."""
-    redacted = copy.deepcopy(score_dict)
-    for track in redacted.get("tracks", []):
-        for bar in track.get("bars", []):
-            notes = bar.get("notes", [])
-            bar["notes"] = f"... ({len(notes)} notes omitted)"
-    return redacted
-
 # ---------------------------------------------------------------------------
 # Result Write-Back
 # ---------------------------------------------------------------------------
@@ -626,6 +634,9 @@ def write_generated_score(score_dict: dict, extraction) -> None:
 
     resolution = score_dict.get("resolution", 12)
     writer = REAPERMIDIWriter(extraction.tempo_map)
+    written_measures = 0
+    written_notes = 0
+    missing_takes = 0
 
     # Precompute which track IDs are autoregressive (only those that actually fire)
     ar_track_ids = {tp["id"] for tp in extraction.track_prompts if tp.get("autoregressive")}
@@ -666,11 +677,19 @@ def write_generated_score(score_dict: dict, extraction) -> None:
             if not take:
                 print(f"Warning: no MIDI take for track {track_info.track_name}, "
                       f"measure {measure.measure_number}\n")
+                missing_takes += 1
                 continue
 
             writer._delete_notes_in_measure(take, measure)
             writer._write_measure_notes(take, measure, notes_are_selected=True)
             RPR_MIDI_Sort(take)
+            written_measures += 1
+            written_notes += len(measure.notes)
+
+    RPR_UpdateArrange()
+    print(f"Write-back complete: {written_measures} measure(s), {written_notes} note(s).\n")
+    if missing_takes:
+        print(f"Write-back skipped {missing_takes} measure(s) without a matching MIDI take.\n")
 
 # ---------------------------------------------------------------------------
 # Main Workflow
@@ -699,6 +718,7 @@ def prepare_generation():
         print(f"Cannot reach server at {server_url}:\n  {e}\n")
         print("Please make sure the MIDI-GPT server is running and reachable, and that")
         print("the server address is correct (MIDI-GPT: Set server address action).\n")
+        _record_error(f"Cannot reach server at {server_url}: {e}")
         return None
 
     checkpoint = info.get("checkpoint", "unknown")
@@ -713,52 +733,60 @@ def prepare_generation():
     else:
         model_type = "yellow"
 
-    print(f"Active Checkpoint : {checkpoint}")
-    print(f"Requested Model   : {selected_model or '(server default)'}")
-    print(f"Model Type        : {model_type.upper()}")
-    print(f"Tick Resolution   : {resolution}")
-    print(f"Masking Support   : pitch_mask={capabilities.get('supports_pitch_mask', False)}, "
-          f"remix={capabilities.get('supports_remix', False)}, "
-          f"streaming={capabilities.get('supports_streaming', False)}\n")
+    print(f"Model: {selected_model or checkpoint} ({model_type.upper()})\n")
 
     options = get_global_options()
-    print("Global options loaded.")
 
-    print("Extracting MIDI from REAPER...\n")
     try:
         extraction = extract_midi_for_mmm(
             mask_selected_items=True,
             mask_empty_items=False,
         )
-    except Exception:
+    except Exception as e:
         print(f"Extraction failed:\n{traceback.format_exc()}\n")
+        _record_error(f"MIDI extraction failed: {e}")
         return None
 
     num_measures = extraction.song.num_measures
     if num_measures == 0:
         print("No MIDI found in selection.\n")
+        _record_error("No MIDI found in selection.")
         return None
     if extraction.masks.count == 0:
         print("No measures to infill -- select some MIDI items first.\n")
+        _record_error("No measures to infill -- select some MIDI items first.")
         return None
 
-    print(f"Tracks   : {extraction.song.num_tracks}")
-    print(f"Measures : {extraction.start_measure}-{extraction.end_measure}")
-    print(f"Masked   : {extraction.masks.count} (track, bar) positions\n")
-
-    print("Track roles:")
     track_prompts = get_track_prompts(num_measures, model_type, extraction)
     # Stash prompts in extraction result for write-back filtering
     extraction.track_prompts = track_prompts
 
     ar_tracks = [tp["id"] for tp in track_prompts if tp["autoregressive"]]
     if ar_tracks:
-        print(f"\nWARNING: Track(s) {ar_tracks} have Autoregressive ON.")
-        print("All bars in those tracks will regenerate regardless of selection.\n")
+        print(f"\nWARNING: Track(s) {ar_tracks} have Autoregressive ON -- all bars in those "
+              "tracks will regenerate regardless of selection.\n")
     else:
         print()
 
-    print("Converting MIDI data...")
+    # Collected here (not just printed) so the dashboard can also surface
+    # these as popups (see logic.py:start_generation()) -- console-only is
+    # easy to miss for something worth knowing before the request goes out.
+    warnings = []
+    total_cells = len(track_prompts) * num_measures
+    total_targeted = sum(len(tp["bars"]) for tp in track_prompts)
+    if track_prompts and total_targeted >= total_cells:
+        # Every (track, bar) in the whole song is a generation/remix target
+        # -- nothing anywhere is left as context for the model to actually
+        # reference. Observed to crash the server outright on a remix-all
+        # request (traceback: "'NoneType' object has no attribute
+        # 'tracks'") rather than fail cleanly -- not something client-side
+        # code can work around, just warn before sending.
+        msg = ("Every bar of every track is being generated/remixed -- there's no context left "
+               "anywhere in the song for the model to reference. This is a known way to trigger "
+               "a server-side failure; consider leaving at least one track or bar unmasked.")
+        print(f"WARNING: {msg}\n")
+        warnings.append(msg)
+
     score_dict = song_to_score_dict(extraction.song, resolution)
 
     config = options.to_config_dict(capabilities.get("supports_token_mask", False))
@@ -778,17 +806,7 @@ def prepare_generation():
     if selected_model:
         request_dict["model"] = selected_model
 
-    # Full outgoing request -- lets you check the exact JSON the server
-    # receives, e.g. to confirm a pitch mask or remix control actually made
-    # it into the payload instead of guessing from the summary line above.
-    # request.score's per-bar note lists are redacted to a count (they're
-    # the bulk of the payload and not useful to eyeball) -- everything else
-    # in the score, and all of request.tracks/config, is printed in full.
-    print("Outgoing request.score (notes omitted):")
-    print(json.dumps(_redact_score_notes(score_dict), indent=2) + "\n")
-    print("Outgoing request.tracks:")
-    print(json.dumps(track_prompts, indent=2) + "\n")
-    print(f"Outgoing request.config: {json.dumps(config)}\n")
+    print("Sending generation request...\n")
 
     return {
         "server_url": server_url,
@@ -797,6 +815,7 @@ def prepare_generation():
         "resolution": resolution,
         "extraction": extraction,
         "request_dict": request_dict,
+        "warnings": warnings,
     }
 
 def finish_generation(handle: GenerationHandle, ctx: dict):
@@ -818,10 +837,12 @@ def finish_generation(handle: GenerationHandle, ctx: dict):
 
     if error:
         print(f"\nGeneration request failed: {error}\n")
+        _record_error(f"Generation request failed: {error}")
         return None
 
     if response is None:
         print("\nGeneration ended with no response (likely cancelled before anything was generated).\n")
+        _record_error("Generation ended with no response (likely cancelled before anything was generated).")
         return None
 
     if status == "cancelled":
@@ -833,12 +854,11 @@ def finish_generation(handle: GenerationHandle, ctx: dict):
         candidates_raw = response.get("candidates", [])
         summary = response.get("summary", {})
         base_seed = response.get("base_seed")
-        print(f"Batch generation finished in {elapsed:.2f}s -- "
-              f"{summary.get('succeeded', 0)}/{summary.get('requested', len(candidates_raw))} candidate(s) succeeded.\n")
+        print(f"Batch finished in {elapsed:.2f}s -- "
+              f"{summary.get('succeeded', 0)}/{summary.get('requested', len(candidates_raw))} candidate(s) succeeded "
+              f"(base seed {base_seed}).\n")
         for f in summary.get("failures", []):
             print(f"  Candidate seed {f.get('seed')} failed: {f.get('reason')}\n")
-        if base_seed is not None:
-            print(f"Base seed: {base_seed}\n")
 
         candidates = []
         selected_index = None
@@ -854,19 +874,22 @@ def finish_generation(handle: GenerationHandle, ctx: dict):
 
         if selected_index is None:
             print("All candidates failed -- nothing written back.\n")
+            failure_reasons = "; ".join(f"seed {f.get('seed')}: {f.get('reason')}" for f in summary.get("failures", []))
+            _record_error(f"All candidates failed -- nothing written back.{(' ' + failure_reasons) if failure_reasons else ''}")
             return {
                 "seed": base_seed, "tokens": tokens, "elapsed": elapsed, "status": status,
                 "candidates": candidates, "selected_index": None, "extraction": extraction,
             }
 
-        print(f"Writing candidate {selected_index + 1} (seed {candidates[selected_index]['seed']}) to REAPER...\n")
         try:
             write_generated_score(candidates[selected_index]["score"], extraction)
-        except Exception:
+        except Exception as e:
             print(f"Write-back failed:\n{traceback.format_exc()}\n")
+            _record_error(f"Write-back to REAPER failed: {e}")
             return None
 
-        print("Done. Use the batch buttons to swap between candidates before generating again.\n")
+        print(f"Wrote candidate {selected_index + 1} to REAPER -- swap between candidates any "
+              "time before the next generation.\n")
         RPR_Undo_OnStateChange("MIDI-GPT Infill (batch)")
         return {
             "seed": candidates[selected_index]["seed"], "tokens": tokens, "elapsed": elapsed, "status": status,
@@ -875,35 +898,30 @@ def finish_generation(handle: GenerationHandle, ctx: dict):
 
     # ---- Single-candidate response shape ---------------------------------- #
     if not response.get("score"):
-        print(f"\nServer error or empty result: {response.get('detail', 'no score in response')}\n")
+        detail = response.get("detail", "no score in response")
+        print(f"\nServer error or empty result: {detail}\n")
+        _record_error(f"Server error or empty result: {detail}")
         return None
 
     seed = response.get("seed")
-    print(f"Generation completed in {elapsed:.2f}s (status: {status}).\n")
-    if seed is not None:
-        print(f"Seed: {seed}\n")
-    if tokens:
-        ctx_tok = tokens.get("context_tokens")
-        gen_tok = tokens.get("generated_tokens")
-        max_tok = tokens.get("max_context_tokens")
-        util = tokens.get("context_utilization")
+    if tokens.get("truncated"):
+        print("WARNING: generation was truncated -- hit the context ceiling before finishing (may be cut off mid-bar).\n")
+    ctx_tok = tokens.get("context_tokens")
+    gen_tok = tokens.get("generated_tokens")
+    max_tok = tokens.get("max_context_tokens")
+    if ctx_tok is not None and gen_tok is not None and max_tok:
         tps = tokens.get("tokens_per_second")
-        if ctx_tok is not None and gen_tok is not None and max_tok is not None:
-            print(f"Tokens: {ctx_tok} context + {gen_tok} generated / {max_tok} max"
-                  + (f" ({util * 100:.0f}%)" if util is not None else "") + "\n")
-        if tps is not None:
-            print(f"Speed: {tps:.1f} tokens/sec\n")
-        if tokens.get("truncated"):
-            print("WARNING: generation was truncated -- hit the context ceiling before finishing (may be cut off mid-bar).\n")
+        tps_note = f", {tps:.1f} tok/s" if tps is not None else ""
+        print(f"Tokens: {ctx_tok} context + {gen_tok} generated / {max_tok} max{tps_note}\n")
 
-    print("Writing generated MIDI to REAPER...\n")
     try:
         write_generated_score(response["score"], extraction)
-    except Exception:
+    except Exception as e:
         print(f"Write-back failed:\n{traceback.format_exc()}\n")
+        _record_error(f"Write-back to REAPER failed: {e}")
         return None
 
-    print("Done.\n")
+    print(f"Done in {elapsed:.2f}s (seed {seed}).\n")
     RPR_Undo_OnStateChange("MIDI-GPT Infill")
 
     return {

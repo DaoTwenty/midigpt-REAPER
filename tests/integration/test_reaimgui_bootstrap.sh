@@ -127,8 +127,8 @@ fi
 scenario "Verifying direct download log messages"
 
 if grep -q "Installing ReaImGui" "$WORK_DIR/install.log" && \
-   grep -q "Downloading ReaImGui" "$WORK_DIR/install.log" && \
-   grep -q "ReaImGui installed and checksum-verified" "$WORK_DIR/install.log"; then
+   grep -q "ReaImGui native binary installed and checksum-verified" "$WORK_DIR/install.log" && \
+   grep -q "Python API installed" "$WORK_DIR/install.log"; then
     pass "Direct download log messages found"
 else
     fail_test "Direct download log messages NOT found"
