@@ -605,6 +605,17 @@ git push origin vX.Y.Z
 
 Review the draft (its notes are auto-generated, so worth a pass) and publish it from the GitHub UI, or `gh release edit vX.Y.Z --draft=false`. To build the zip locally without publishing anything: `./dev/build_release.sh`.
 
+#### Linux clean-machine check
+
+CI runs the installer on Linux but never starts REAPER or Sforzando, so run this before a release that changes the Linux install path (`install.sh`, Setup Tracks, `dev/dev_reset.sh`). Use a fresh Linux desktop VM, e.g. the current Ubuntu LTS, with nothing from a previous run: REAPER installed from its Linux tarball and launched once, plus Python 3.10–3.12 and git.
+
+1. **Sforzando:** download "sforzando for Linux (beta)" from Plogue's [downloads page](https://www.plogue.com/downloads.html#sforzando), unzip it and run `./install_sforzando.sh`.
+2. **Installer:** run `./install.sh` and answer **y** to the Arachno download. Expect no `[WARN]` lines other than "No published checksum for ReaImGui", and `[OK] VST plug-in paths: ...;/usr/lib/vst3`.
+3. **REAPER:** *Options > Preferences > Plug-Ins > ReaScript* shows Python as detected, and the FX browser lists **sforzando (VST3)**, not just the CLAP build.
+4. **Setup Tracks:** import a multitrack `.mid` file (one track per MIDI channel) and run Setup Tracks. The first run prints "Converting the Arachno SoundFont…", then every track gets a Sforzando instance, and playback moves the track meters.
+5. **Dashboard:** open `MIDI-GPT.py`. The banner lines up without drifted columns or clipping, and generating over a time selection writes new MIDI.
+6. **Reset:** close REAPER and run `./dev/dev_reset.sh`. Every category reports something removed (including Plogue's packages via `apt`), and afterwards `/usr/lib/vst3/sforzando.vst3` and `~/.config/Plogue` are gone and `reaper.ini` has no `reascript`/`pythonlib*` keys. Repeating steps 1–5 from here should pass again.
+
 ### Project Layout
 
 - `src/Scripts/MIDI-GPT/` — the 5 REAPER action scripts, the `midigpt_dashboard/` UI package, and `midi_extraction.py` (the REAPER ↔ MIDI-GPT conversion layer)
