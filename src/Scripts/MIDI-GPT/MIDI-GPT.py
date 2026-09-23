@@ -10,6 +10,7 @@
   layout, fixed size.
 """
 
+import platform
 import sys
 from reaper_python import *
 sys.path.append(RPR_GetResourcePath() + "/Scripts/ReaTeam Extensions/API")
@@ -32,6 +33,20 @@ MGPT_BANNER = (
     "             \u255a\u2588\u2588\u2588\u2588\u2588\u2554\u255d"
 )
 MGPT_BANNER_FONT_SIZE = 5.5
+
+# The banner only lines up in a monospaced font that has every glyph it
+# uses -- a missing font or glyph falls back to one with different advance
+# widths, and the columns drift. Menlo is macOS-only. On Windows, Consolas
+# has all of them at one width except U+25E2 (the one "◢"), which is
+# swapped for U+2584 ("▄"), the nearest glyph it does have. Elsewhere,
+# ReaImGui's generic "monospace" family.
+if platform.system() == "Darwin":
+    BANNER_FONT_FAMILY = "Menlo"
+elif platform.system() == "Windows":
+    BANNER_FONT_FAMILY = "Consolas"
+    MGPT_BANNER = MGPT_BANNER.replace("◢", "▄")
+else:
+    BANNER_FONT_FAMILY = "monospace"
 
 # Grid height proportions (15%, 55%, 30%)
 ROW_RATIOS = [0.15, 0.55, 0.30]
@@ -284,7 +299,7 @@ def draw_generation_panel():
 def init():
     global ctx, mono_font, logic
     ctx = imgui.CreateContext('MIDI-GPT Dashboard')
-    mono_font = imgui.CreateFont('Menlo')
+    mono_font = imgui.CreateFont(BANNER_FONT_FAMILY)
     imgui.Attach(ctx, mono_font)
     logic = DashboardLogic(GLOBAL_SETTINGS, dashboard_state, log_lines)
     logic.refresh_model_info()

@@ -90,8 +90,13 @@ def _draw_server_popup(ctx, window_center):
         # No label here -- the popup's own title bar ("Set MIDI-GPT
         # Server") already says what this is.
         imgui.SetNextItemWidth(ctx, 320)
-        entered, _server_url_draft = imgui.InputText(
-            ctx, "##server_url_input", _server_url_draft, imgui.InputTextFlags_EnterReturnsTrue()
+        # No InputTextFlags_EnterReturnsTrue: with it, ImGui only writes the
+        # edited text back to _server_url_draft when Enter is pressed, so
+        # typing a URL and clicking Save saved the old one. Without it the
+        # draft tracks every keystroke, and Enter is detected separately.
+        _, _server_url_draft = imgui.InputText(ctx, "##server_url_input", _server_url_draft)
+        entered = imgui.IsItemDeactivated(ctx) and (
+            imgui.IsKeyPressed(ctx, imgui.Key_Enter()) or imgui.IsKeyPressed(ctx, imgui.Key_KeypadEnter())
         )
         hints.show(ctx, "setup.server_popup.url_input")
         if imgui.Button(ctx, "Save", 100, 0) or entered:
