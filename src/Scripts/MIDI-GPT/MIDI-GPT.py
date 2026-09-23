@@ -37,14 +37,20 @@ MGPT_BANNER_FONT_SIZE = 5.5
 # The banner only lines up in a monospaced font that has every glyph it
 # uses -- a missing font or glyph falls back to one with different advance
 # widths, and the columns drift. Menlo is macOS-only. On Windows, Consolas
-# has all of them at one width except U+25E2 (the one "◢"), which is
-# swapped for U+2584 ("▄"), the nearest glyph it does have. Elsewhere,
-# ReaImGui's generic "monospace" family.
+# has all of them at one width except U+25E2, which is swapped for
+# U+2584, the nearest glyph it does have. Elsewhere, ReaImGui's generic
+# "monospace" family.
+# (Every non-ASCII character in this file, including here, must stay a
+# \uXXXX escape rather than a literal glyph -- REAPER's ReaScript loader
+# reads .py files with the platform's default codec rather than honoring
+# the coding cookie above, and that default is plain ASCII on some
+# platforms/setups, which raised a UnicodeDecodeError on a literal glyph
+# here.)
 if platform.system() == "Darwin":
     BANNER_FONT_FAMILY = "Menlo"
 elif platform.system() == "Windows":
     BANNER_FONT_FAMILY = "Consolas"
-    MGPT_BANNER = MGPT_BANNER.replace("◢", "▄")
+    MGPT_BANNER = MGPT_BANNER.replace("\u25e2", "\u2584")
 else:
     BANNER_FONT_FAMILY = "monospace"
 
