@@ -242,16 +242,22 @@ ALLOWED_WARNINGS=(
     # macOS: no Full Disk Access for the Desktop when run non-interactively.
     "Couldn't create Desktop shortcut"
 )
+# A function with [[ ]] rather than an inline `case` -- macOS's bash 3.2
+# misparses a case pattern's `)` inside $( ... ) as the end of the command
+# substitution.
+is_allowed_warning() {
+    local w
+    for w in "${ALLOWED_WARNINGS[@]}"; do
+        [[ "$1" == *"$w"* ]] && return 0
+    done
+    return 1
+}
 # $'\033' rather than sed's \x1b, which BSD sed (macOS) doesn't support;
 # `|| true` because grep exits 1 when there are no warnings at all, which
 # pipefail + set -e would otherwise turn into aborting this script.
 ESC=$'\033'
 UNEXPECTED_WARNINGS="$(sed "s/${ESC}\[[0-9;]*m//g" "$INSTALL_LOG" | { grep '^\[WARN\]' || true; } | while IFS= read -r line; do
-    allowed=false
-    for w in "${ALLOWED_WARNINGS[@]}"; do
-        case "$line" in *"$w"*) allowed=true ;; esac
-    done
-    [ "$allowed" = true ] || printf '%s\n' "$line"
+    is_allowed_warning "$line" || printf '%s\n' "$line"
 done)"
 TESTS=$((TESTS + 1))
 if [ -z "$UNEXPECTED_WARNINGS" ]; then
