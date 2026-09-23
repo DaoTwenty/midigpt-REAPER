@@ -1,0 +1,38 @@
+1
+00:00:01,000 --> 00:00:06,657
+MIDI-GPT for REAPER writes MIDI that
+fits the song you already have.
+
+2
+00:00:06,857 --> 00:00:11,229
+Here's a short song: drums,
+bass, keys and a lead.
+
+3
+00:00:11,429 --> 00:00:15,300
+Select the bars the
+model should listen to…
+
+4
+00:00:15,500 --> 00:00:20,371
+…and the part you want it to
+write: the lead in bars 5–8.
+
+5
+00:00:20,571 --> 00:00:24,371
+Ask for 3 variations and click "Generate".
+
+6
+00:00:28,571 --> 00:00:33,443
+Each candidate is a different
+take. Click one to hear it.
+
+7
+00:00:39,643 --> 00:00:43,514
+Keep the one you like.
+Undo works as usual.
+
+8
+00:00:43,714 --> 00:00:49,443
+The next videos cover installing,
+every control, and common pitfalls.

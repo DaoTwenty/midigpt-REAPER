@@ -14,6 +14,7 @@ HTML_PATH = ROOT / "docs" / "index.html"
 README_PATH = ROOT / "README.md"
 INSTRUMENTS_PATH = ROOT / "INSTRUMENTS.md"
 VST_PATH = ROOT / "VST.md"
+TUTORIALS_PATH = ROOT / "TUTORIALS.md"
 
 PLACEHOLDER = "{{README_CONTENT}}"
 # Regex to match everything between the <script id="readme-source"> tags
@@ -27,7 +28,8 @@ def build():
     readme = README_PATH.read_text(encoding="utf-8")
     instruments = INSTRUMENTS_PATH.read_text(encoding="utf-8")
     vst = VST_PATH.read_text(encoding="utf-8")
-    combined = readme + "\n\n---\n\n" + instruments + "\n\n---\n\n" + vst
+    tutorials = TUTORIALS_PATH.read_text(encoding="utf-8")
+    combined = "\n\n---\n\n".join([readme, instruments, vst, tutorials])
     # Escape </script> inside the embedded block so the browser doesn't break
     content_safe = combined.replace("</script>", "<\\/script>")
 
@@ -47,7 +49,7 @@ def build():
         )
 
     HTML_PATH.write_text(html, encoding="utf-8")
-    print(f"docs/index.html updated ({len(combined)} chars embedded from README.md + INSTRUMENTS.md + VST.md)")
+    print(f"docs/index.html updated ({len(combined)} chars embedded from README.md + INSTRUMENTS.md + VST.md + TUTORIALS.md)")
 
 
 if __name__ == "__main__":

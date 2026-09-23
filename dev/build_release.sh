@@ -97,7 +97,7 @@ for f in \
 done
 
 # ── Documentation ──
-info "Regenerating docs/index.html from README.md + INSTRUMENTS.md + VST.md..."
+info "Regenerating docs/index.html from README.md + INSTRUMENTS.md + VST.md + TUTORIALS.md..."
 python3 "$SCRIPT_DIR/build_docs.py"
 cp "$SCRIPT_DIR/README.md" "$RELEASE_DIR/"
 mkdir -p "$RELEASE_DIR/docs"

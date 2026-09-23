@@ -1,0 +1,33 @@
+1
+00:00:01,000 --> 00:00:06,014
+Tracks silent after Setup
+Tracks? The Console tab says why.
+
+2
+00:00:06,214 --> 00:00:12,943
+"Sforzando isn't in REAPER's plugin list":
+install Sforzando, then rescan plug-ins.
+
+3
+00:00:13,143 --> 00:00:17,871
+Options > Preferences >
+Plug-ins > VST, then "Re-scan".
+
+4
+00:00:20,071 --> 00:00:26,086
+Only Sforzando's VST or VST3 plug-in
+works. AU and CLAP aren't supported.
+
+5
+00:00:26,286 --> 00:00:33,086
+"The Arachno SoundFont isn't downloaded":
+re-run the installer, answer y to Arachno.
+
+6
+00:00:35,286 --> 00:00:38,086
+Then run Setup Tracks again.
+
+7
+00:00:38,286 --> 00:00:44,657
+Each track should have a Sforzando instance
+with an Arachno instrument loaded.

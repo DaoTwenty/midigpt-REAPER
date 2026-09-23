@@ -1,0 +1,27 @@
+1
+00:00:01,000 --> 00:00:07,300
+"Server not reachable" means the dashboard
+can't talk to the MIDI-GPT server.
+
+2
+00:00:07,500 --> 00:00:10,586
+Generating now shows this error.
+
+3
+00:00:10,786 --> 00:00:16,871
+Usually the server just isn't running.
+Start it from the Desktop shortcut.
+
+4
+00:00:21,071 --> 00:00:23,229
+Then click "Retry".
+
+5
+00:00:23,429 --> 00:00:29,371
+The server runs on another computer?
+Check its address with "Change...".
+
+6
+00:00:29,571 --> 00:00:34,871
+The server's computer must also
+allow connections on port 3456.

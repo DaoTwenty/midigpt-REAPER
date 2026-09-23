@@ -1,0 +1,32 @@
+1
+00:00:01,000 --> 00:00:05,014
+Want options? Raise
+"Variations to generate".
+
+2
+00:00:05,214 --> 00:00:09,157
+Each variation uses a
+different random seed.
+
+3
+00:00:09,357 --> 00:00:11,371
+Click "Generate".
+
+4
+00:00:16,571 --> 00:00:22,443
+Click a candidate to write it into
+REAPER. Switch as often as you like.
+
+5
+00:00:26,643 --> 00:00:29,871
+Hover a candidate to see its seed.
+
+6
+00:00:30,071 --> 00:00:34,514
+A greyed-out candidate
+failed. Hover it to see why.
+
+7
+00:00:34,714 --> 00:00:39,729
+Your pick stays until the next
+generation. Undo removes it.

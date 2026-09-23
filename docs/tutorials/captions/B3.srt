@@ -1,0 +1,37 @@
+1
+00:00:01,000 --> 00:00:03,871
+MIDI-GPT works in whole bars.
+
+2
+00:00:04,071 --> 00:00:08,729
+The time selection is what
+the model reads as context.
+
+3
+00:00:08,929 --> 00:00:12,943
+The selected MIDI items
+are what it rewrites.
+
+4
+00:00:13,143 --> 00:00:19,157
+Here: bars 1–8 as context, and the
+bass in bars 5–6 as the part to write.
+
+5
+00:00:19,357 --> 00:00:21,371
+Click "Generate".
+
+6
+00:00:23,571 --> 00:00:28,800
+The Information tab shows the
+progress while the model writes.
+
+7
+00:00:32,000 --> 00:00:36,657
+The new bars are written
+straight into the bass track.
+
+8
+00:00:40,857 --> 00:00:45,657
+Not what you wanted? Undo it
+(Cmd/Ctrl+Z) and try again.

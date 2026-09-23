@@ -1,0 +1,37 @@
+1
+00:00:01,000 --> 00:00:07,157
+In REAPER, open Actions > Show Action
+List, then click "Load ReaScript...".
+
+2
+00:00:07,357 --> 00:00:12,157
+Open the MIDI-GPT folder inside
+REAPER's Scripts folder.
+
+3
+00:00:12,357 --> 00:00:18,086
+Choose "MIDI-GPT.py". That's the
+dashboard, the only script you need.
+
+4
+00:00:18,286 --> 00:00:23,157
+The other scripts are helpers
+the dashboard runs for you.
+
+5
+00:00:23,357 --> 00:00:26,443
+Run it, and the dashboard opens.
+
+6
+00:00:28,643 --> 00:00:34,657
+Tip: give it a shortcut. Select it in
+the Action List and click "Add...".
+
+7
+00:00:36,857 --> 00:00:43,514
+Or add it to a toolbar: right-click the
+toolbar and choose "Customize toolbar...".
+
+8
+00:00:46,714 --> 00:00:50,086
+Now the dashboard is one click away.

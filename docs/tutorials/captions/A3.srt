@@ -1,0 +1,47 @@
+1
+00:00:01,000 --> 00:00:05,157
+Download the latest
+release zip and extract it.
+
+2
+00:00:05,357 --> 00:00:08,800
+Double-click "Install - Windows.bat".
+
+3
+00:00:09,000 --> 00:00:15,300
+PyTorch needs the Microsoft Visual C++
+Runtime. If it's missing, press Enter.
+
+4
+00:00:15,500 --> 00:00:19,657
+Windows asks for
+administrator permission once.
+
+5
+00:00:22,857 --> 00:00:29,657
+The rest matches macOS: answer y to close
+REAPER so its extensions can be installed.
+
+6
+00:00:29,857 --> 00:00:34,300
+Python and the MIDI-GPT
+backend take a few minutes.
+
+7
+00:00:37,500 --> 00:00:41,300
+The ReaImGui checksum warning is expected.
+
+8
+00:00:41,500 --> 00:00:47,943
+Answer y to open Sforzando's download
+page, and keep the VST3 plug-in selected.
+
+9
+00:00:51,143 --> 00:00:55,014
+Answer y to download
+the Arachno SoundFont.
+
+10
+00:00:57,214 --> 00:01:02,586
+Done. A "Start MIDI-GPT Server"
+shortcut is now on your Desktop.

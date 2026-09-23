@@ -1,0 +1,39 @@
+1
+00:00:01,000 --> 00:00:04,871
+The dashboard is one
+window with six areas.
+
+2
+00:00:05,071 --> 00:00:10,157
+Top right: the server, the model,
+track setup, and Settings.
+
+3
+00:00:10,357 --> 00:00:15,443
+Middle left: global settings
+that apply to every generation.
+
+4
+00:00:15,643 --> 00:00:20,514
+Middle right: one strip per
+track, with its own controls.
+
+5
+00:00:20,714 --> 00:00:26,300
+Bottom right: how many variations
+to make, and the Generate button.
+
+6
+00:00:26,500 --> 00:00:31,943
+Bottom left: a summary of the last
+generation, and a console log.
+
+7
+00:00:34,143 --> 00:00:40,157
+Your settings are saved in the project,
+and come back when you reopen it.
+
+8
+00:00:40,357 --> 00:00:46,014
+The server address, model and theme
+are saved for the whole machine.

@@ -1,0 +1,58 @@
+1
+00:00:01,000 --> 00:00:06,800
+Setup Tracks gives every track a
+General MIDI instrument you can hear.
+
+2
+00:00:07,000 --> 00:00:13,086
+It reads each track's MIDI to find its
+instrument: channel 10 means drums.
+
+3
+00:00:13,286 --> 00:00:16,514
+Keep the defaults and click "Run".
+
+4
+00:00:16,714 --> 00:00:23,443
+The first time, the Arachno SoundFont is
+converted. This takes a few seconds, once.
+
+5
+00:00:25,643 --> 00:00:29,729
+The Console lists what
+happened on each track.
+
+6
+00:00:29,929 --> 00:00:36,729
+Each track is renamed to its instrument:
+MIDI-GPT reads names to know what to write.
+
+7
+00:00:39,929 --> 00:00:46,014
+Want to check each guess first? Choose
+"let me confirm/override each one".
+
+8
+00:00:46,214 --> 00:00:51,014
+Pick a different instrument
+from the list, then "Apply".
+
+9
+00:00:53,214 --> 00:00:58,157
+"Setup Selected Tracks" works
+on the selected tracks only.
+
+10
+00:00:58,357 --> 00:01:03,657
+Choose "Replace it" to swap an
+instrument that's already there.
+
+11
+00:01:03,857 --> 00:01:08,157
+Using your own synths?
+Choose "Track names only".
+
+12
+00:01:08,357 --> 00:01:14,157
+Everything here can be undone (Cmd+Z
+on Mac, Ctrl+Z on Windows/Linux).

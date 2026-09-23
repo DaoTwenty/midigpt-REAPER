@@ -1,0 +1,38 @@
+1
+00:00:01,000 --> 00:00:06,300
+The dashboard talks to a MIDI-GPT
+server. It isn't running yet.
+
+2
+00:00:06,500 --> 00:00:12,086
+Start it with the "Start MIDI-GPT
+Server" shortcut on your Desktop.
+
+3
+00:00:12,286 --> 00:00:16,300
+Keep this window open
+while you use MIDI-GPT.
+
+4
+00:00:16,500 --> 00:00:22,014
+The first start downloads the model,
+which can take a few minutes.
+
+5
+00:00:26,214 --> 00:00:29,657
+Back in the dashboard, click "Retry".
+
+6
+00:00:29,857 --> 00:00:35,657
+The model picker fills in, and the
+model's family is shown next to it.
+
+7
+00:00:35,857 --> 00:00:42,014
+The server address is shown here.
+"Change..." points it at another machine.
+
+8
+00:00:42,214 --> 00:00:46,371
+To stop the server, press
+Ctrl+C in its window.

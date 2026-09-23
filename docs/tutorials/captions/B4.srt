@@ -1,0 +1,43 @@
+1
+00:00:01,000 --> 00:00:04,943
+To write a new part,
+start with a new track.
+
+2
+00:00:05,143 --> 00:00:11,300
+Name it after its instrument: the name
+is how MIDI-GPT knows what to write.
+
+3
+00:00:11,500 --> 00:00:15,443
+The full list of names
+is in INSTRUMENTS.md.
+
+4
+00:00:15,643 --> 00:00:21,014
+Create an empty MIDI item over
+the bars you want, and select it.
+
+5
+00:00:21,214 --> 00:00:26,871
+MIDI-GPT only writes into MIDI items,
+so the empty item is required.
+
+6
+00:00:27,071 --> 00:00:32,514
+Tick "A" (autoregressive): it
+writes the whole track, bar by bar.
+
+7
+00:00:32,714 --> 00:00:39,229
+On an empty track, set the controls
+yourself. Here: one or two voices at a time.
+
+8
+00:00:41,429 --> 00:00:45,443
+Select the context bars
+and click "Generate".
+
+9
+00:00:50,643 --> 00:00:54,014
+A new cello part that fits the song.

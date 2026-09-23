@@ -37,3 +37,7 @@ __pycache__/
 # Local-only PRISM testing convenience (see .prism/config.yaml) -- not a
 # project feature, just how Claude reaches nibi via MFA-aware SSH for tests.
 /.prism/
+
+# Tutorial videos: raw recordings and rendered output (never committed)
+tutorials-raw/
+tutorials-out/

@@ -1,0 +1,44 @@
+1
+00:00:01,000 --> 00:00:06,229
+On Linux, install Sforzando first.
+Plogue offers it as a beta.
+
+2
+00:00:06,429 --> 00:00:12,871
+Unzip it and run install_sforzando.sh,
+without sudo: it asks for your password.
+
+3
+00:00:16,071 --> 00:00:20,586
+Now run the MIDI-GPT installer
+from the release zip.
+
+4
+00:00:20,786 --> 00:00:25,943
+Answer y so it can close REAPER
+while it installs extensions.
+
+5
+00:00:29,143 --> 00:00:35,514
+Sforzando's VST3 lives in /usr/lib/vst3,
+which REAPER doesn't scan by default.
+
+6
+00:00:35,714 --> 00:00:41,157
+The installer adds that folder to
+REAPER's plug-in paths for you.
+
+7
+00:00:43,357 --> 00:00:47,229
+Answer y to download
+the Arachno SoundFont.
+
+8
+00:00:49,429 --> 00:00:54,443
+In REAPER, Sforzando's VST3
+now shows up in the FX browser.
+
+9
+00:00:54,643 --> 00:01:00,514
+On minimal systems, Sforzando also
+needs: sudo apt install libxcb-util1
