@@ -401,10 +401,14 @@ def _aria_bank_has_arachno():
 
 def _manual_import_instructions():
     sf2_name = _find_arachno_sf2_name() or "the Arachno .sf2"
-    return ("To set it up by hand, once: add Sforzando to any track, drag\n"
+    # Sforzando's Linux build doesn't accept dropped files (Plogue's own beta
+    # notes) -- only its Import menu works there.
+    how = ("import it with Sforzando's Import menu (top left)"
+           if platform.system() == "Linux" else "drag it onto Sforzando's window")
+    return ("To set it up by hand, once: add Sforzando to any track, then\n"
             f"  {os.path.join(_soundfonts_dir(), sf2_name)}\n"
-            "onto Sforzando's window (it converts the SoundFont -- a few seconds), "
-            "then run Setup Tracks again.")
+            f"-- {how}; it converts the SoundFont (a few seconds). "
+            "Then run Setup Tracks again.")
 
 # ---------------------------------------------------------------------------
 # Which Sforzando build REAPER has

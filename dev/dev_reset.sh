@@ -285,6 +285,45 @@ elif [ "$PLATFORM" = "windows" ]; then
         "${PROGRAMFILES:-/c/Program Files}/VSTPlugins/sforzando.dll"
         "${PROGRAMFILES:-/c/Program Files}/Steinberg/VstPlugins/sforzando.dll"
     )
+elif [ "$PLATFORM" = "linux" ]; then
+    # Plogue's Linux beta (install_sforzando.sh) apt-installs its .debs on
+    # Debian-based distros, or copies their contents to these same places
+    # elsewhere. /opt/Plogue/Aria is the engine every Plogue instrument
+    # shares, so it's only removed through apt, when nothing else needs it.
+    SFZ_PATHS=(
+        "/usr/lib/vst3/sforzando.vst3"
+        "/usr/lib/clap/sforzando.clap"
+        "/opt/Plogue/sforzando"
+        "$HOME/.vst3/sforzando.vst3"
+        "$HOME/.clap/sforzando.clap"
+        "$HOME/.config/Plogue/sforzando"
+    )
+    deb_installed() {
+        command -v dpkg-query >/dev/null 2>&1 &&
+            dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q "install ok installed"
+    }
+    if deb_installed plogue-sforzando; then
+        SFZ_PKGS=(plogue-sforzando)
+        deb_installed plogue-tablewarp2 && SFZ_PKGS+=(plogue-tablewarp2)
+        OTHER_PLOGUE="$(dpkg-query -W -f='${Package} ${Status}\n' 'plogue-*' 2>/dev/null |
+            awk '/install ok installed/ && $1 !~ /^plogue-(aria|sforzando|tablewarp2)$/ { print $1 }')"
+        if deb_installed plogue-aria; then
+            if [ -z "$OTHER_PLOGUE" ]; then
+                SFZ_PKGS+=(plogue-aria)
+            else
+                info "Keeping plogue-aria -- still needed by: $(echo $OTHER_PLOGUE)"
+            fi
+        fi
+        if confirm "Remove Sforzando's packages (${SFZ_PKGS[*]}) with sudo apt remove?"; then
+            if sudo apt-get remove -y "${SFZ_PKGS[@]}"; then
+                ok "Removed ${SFZ_PKGS[*]}"
+                # Aria's per-user logs and plugin caches go with the engine.
+                [[ " ${SFZ_PKGS[*]} " == *" plogue-aria "* ]] && SFZ_PATHS+=("$HOME/.config/Plogue/Aria")
+            else
+                warn "apt remove failed -- remove manually: sudo apt remove ${SFZ_PKGS[*]}"
+            fi
+        fi
+    fi
 fi
 
 FOUND_SFZ=()
@@ -292,9 +331,7 @@ for p in "${SFZ_PATHS[@]:-}"; do
     [ -e "$p" ] && FOUND_SFZ+=("$p")
 done
 
-if [ "$PLATFORM" = "linux" ]; then
-    info "Sforzando has no standard Linux plugin location -- remove it manually if installed"
-elif [ ${#FOUND_SFZ[@]} -eq 0 ]; then
+if [ ${#FOUND_SFZ[@]} -eq 0 ]; then
     info "No Sforzando plugin files found in standard locations"
 else
     echo "  Found:"
@@ -327,15 +364,24 @@ fi
 step "reaper.ini ReaScript/Python config"
 
 REAPER_INI="$REAPER_DIR/reaper.ini"
-if [ -f "$REAPER_INI" ] && grep -qE '^(reascript|pythonlibpath64|pythonlibdll64)=' "$REAPER_INI" 2>/dev/null; then
+# On Linux install.sh also appends /usr/lib/vst3 (Sforzando's VST3 folder)
+# to vstpath; strip just that entry, leaving any paths the user added.
+if [ -f "$REAPER_INI" ] && { grep -qE '^(reascript|pythonlibpath64|pythonlibdll64)=' "$REAPER_INI" ||
+        { [ "$PLATFORM" = "linux" ] && grep -qE '^vstpath=(.*;)?/usr/lib/vst3(;|$)' "$REAPER_INI"; }; } 2>/dev/null; then
     if reaper_is_running; then
         warn "REAPER is still open -- skipping reaper.ini (it would just get overwritten on quit)"
-    elif confirm "Remove reascript=1 / pythonlibpath64 / pythonlibdll64 from reaper.ini?"; then
+    elif confirm "Remove reascript=1 / pythonlibpath64 / pythonlibdll64$([ "$PLATFORM" = "linux" ] && echo " and vstpath's /usr/lib/vst3") from reaper.ini?"; then
         cp "$REAPER_INI" "${REAPER_INI}.dev-reset-backup"
-        awk '
+        awk -v linux="$([ "$PLATFORM" = "linux" ] && echo 1)" '
             /^reascript=/ { next }
             /^pythonlibpath64=/ { next }
             /^pythonlibdll64=/ { next }
+            linux && /^vstpath=/ {
+                n = split(substr($0, 9), parts, ";"); out = ""
+                for (i = 1; i <= n; i++)
+                    if (parts[i] != "/usr/lib/vst3") out = out (out == "" ? "" : ";") parts[i]
+                print "vstpath=" out; next
+            }
             { print }
         ' "$REAPER_INI" > "${REAPER_INI}.tmp" && mv "${REAPER_INI}.tmp" "$REAPER_INI"
         ok "Removed ReaScript/Python config (backup: ${REAPER_INI}.dev-reset-backup)"

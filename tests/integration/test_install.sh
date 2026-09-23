@@ -231,6 +231,11 @@ assert "pythonlibpath64/pythonlibdll64 inside [reaper] point to an existing libp
     test -n "$PY_LIB_FILE" -a -f "$PY_LIB_DIR/$PY_LIB_FILE"
 assert "the Python library isn't inside the venv" \
     bash -c "case '$PY_LIB_DIR' in '$CLONE_DIR/.venv'*) exit 1 ;; *) exit 0 ;; esac"
+if [ "$(uname -s)" = "Linux" ]; then
+    # Sforzando's Linux .deb installs its VST3 there; REAPER doesn't scan it by default.
+    assert "vstpath inside [reaper] includes /usr/lib/vst3 (Linux)" \
+        bash -c "case ';$(ini_key vstpath);' in *';/usr/lib/vst3;'*) exit 0 ;; *) exit 1 ;; esac"
+fi
 
 # 9. No unexpected warnings. install.sh deliberately exits 0 when a step
 # fails but has a manual fallback -- a [WARN] line is the only trace of

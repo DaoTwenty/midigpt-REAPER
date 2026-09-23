@@ -898,6 +898,19 @@ if [ -f "$REAPER_INI" ]; then
                 echo "  Configure manually: Options > Preferences > Plug-Ins > ReaScript"
                 echo "    Python library: $PY_LIB_DIR/$PY_LIB_FILE"
             fi
+
+            # Sforzando's Linux .deb installs its VST3 to /usr/lib/vst3, which
+            # REAPER on Linux doesn't scan by default (~/.vst;~/.vst3 only), so
+            # without this only its CLAP shows up -- and Setup Tracks can't use CLAP.
+            if [ "$PLATFORM" = "linux" ]; then
+                VST_PATH="$(grep -m1 '^vstpath=' "$REAPER_INI" | cut -d= -f2-)"
+                [ -n "$VST_PATH" ] || VST_PATH='~/.vst;~/.vst3'
+                case ";$VST_PATH;" in
+                    *";/usr/lib/vst3;"*) ;;
+                    *) set_reaper_ini "vstpath" "$VST_PATH;/usr/lib/vst3" "$REAPER_INI" ;;
+                esac
+                ok "VST plug-in paths: $(grep -m1 '^vstpath=' "$REAPER_INI" | cut -d= -f2-)"
+            fi
         else
             warn "Could not detect Python dynamic library path"
             echo "  You'll need to configure this manually in REAPER:"
@@ -1092,13 +1105,35 @@ if [ -t 0 ] && [ "$BACKEND_ONLY" = false ]; then
     echo "  Sforzando is a real application installer (not just a data file),"
     echo "  behind its own download page, so this installer opens that page for"
     echo "  you rather than running an installer on your behalf."
+    SFZ_URL="https://www.plogue.com/products/sforzando.html"
+    if [ "$PLATFORM" = "linux" ]; then
+        # The Linux build is only on the downloads page, not the product page.
+        SFZ_URL="https://www.plogue.com/downloads.html#sforzando"
+        echo ""
+        warn "Sforzando for Linux is a BETA from Plogue -- it works with MIDI-GPT"
+        echo "  (VST3, tested on Ubuntu 24.04), but may be less stable than the"
+        echo "  macOS/Windows builds."
+        echo ""
+        echo "  To install it:"
+        echo "    1. Download 'sforzando for Linux (beta)' -- the x86_64 (or aarch64) zip"
+        echo "    2. Unzip it, open a terminal in the unzipped folder, and run:"
+        echo "         ./install_sforzando.sh"
+        echo "       (Plogue's own installer -- run it without sudo; it asks for your"
+        echo "       password itself. It installs to /opt/Plogue, /usr/lib/vst3 and"
+        echo "       /usr/lib/clap.)"
+        echo "    3. Restart REAPER. This installer has already added /usr/lib/vst3"
+        echo "       to REAPER's VST paths, so the VST3 shows up on its own."
+        echo "  On a minimal install (no desktop environment), Sforzando also needs"
+        echo "  libxcb-util1: sudo apt install libxcb-util1"
+        echo ""
+    fi
     read -rp "  Open the Sforzando download page in your browser now? [y/N]: " _OPEN_SFZ
     if [[ "$_OPEN_SFZ" =~ ^[Yy]$ ]]; then
-        if open_url "https://www.plogue.com/products/sforzando.html"; then
+        if open_url "$SFZ_URL"; then
             ok "Opened the Sforzando download page"
         else
             warn "Could not open browser automatically"
-            echo "  Visit manually: https://www.plogue.com/products/sforzando.html"
+            echo "  Visit manually: $SFZ_URL"
         fi
     fi
     echo ""

@@ -108,10 +108,21 @@ step "Left in place (not this plugin's to remove)"
 warn "ReaPack (REAPER extension) -- you may have it installed for other scripts too."
 warn "ReaImGui (REAPER extension) -- likewise, other REAPER scripts may depend on it."
 warn "Sforzando -- a separate application, installed outside REAPER entirely."
-echo "  Uninstall it the normal way for your OS if you don't want it anymore."
+if [ "$(uname -s)" = "Linux" ]; then
+    echo "  If you don't want it anymore, remove Plogue's packages (plogue-aria is"
+    echo "  the engine every Plogue instrument shares -- removing it also removes"
+    echo "  any other Plogue instrument you have):"
+    echo "    sudo apt remove plogue-sforzando plogue-tablewarp2 plogue-aria"
+else
+    echo "  Uninstall it the normal way for your OS if you don't want it anymore."
+fi
 if [ -n "$REAPER_DIR" ] && [ -f "$REAPER_DIR/reaper.ini" ]; then
     warn "reaper.ini's ReaScript/Python settings were left as installed -- other"
     echo "  ReaScripts likely depend on them too."
+    if [ "$(uname -s)" = "Linux" ]; then
+        echo "  Likewise /usr/lib/vst3 in its VST plug-in paths (Plogue's and other"
+        echo "  system-wide VST3 plugins install there)."
+    fi
     if [ -f "$REAPER_DIR/reaper.ini.midigpt-backup" ]; then
         echo "  A pre-install backup is still at:"
         echo "    $REAPER_DIR/reaper.ini.midigpt-backup"

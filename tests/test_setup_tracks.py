@@ -344,7 +344,7 @@ class TestPrepareInstrumentSetup:
         monkeypatch.setattr(setup_tracks, "ensure_arachno_sfz", lambda: (False, "no converter"))
         monkeypatch.setattr(setup_tracks, "_aria_bank_has_arachno", lambda: False)
         assert setup_tracks.prepare_instrument_setup() is None
-        assert any("drag" in p and REAL_ARACHNO_SF2_NAME in p for p in printed)
+        assert any("set it up by hand" in p and REAL_ARACHNO_SF2_NAME in p for p in printed)
 
     def test_unknown_bank_state_uses_bank_with_a_note(self, fake_repo, monkeypatch):
         printed = []
@@ -352,7 +352,18 @@ class TestPrepareInstrumentSetup:
         monkeypatch.setattr(setup_tracks, "ensure_arachno_sfz", lambda: (False, "no converter"))
         monkeypatch.setattr(setup_tracks, "_aria_bank_has_arachno", lambda: None)
         assert setup_tracks.prepare_instrument_setup() == {"plugin_format": "vst3", "use_sfz_files": False}
-        assert any("drag" in p for p in printed)
+        assert any("set it up by hand" in p for p in printed)
+
+    @pytest.mark.parametrize("system,expected,absent", [
+        ("Linux", "Import menu", "drag"),
+        ("Windows", "drag it onto", "Import menu"),
+        ("Darwin", "drag it onto", "Import menu"),
+    ])
+    def test_manual_import_wording_per_platform(self, fake_repo, monkeypatch, system, expected, absent):
+        # Sforzando's Linux build ignores dropped files; only its Import menu works.
+        monkeypatch.setattr(setup_tracks.platform, "system", lambda: system)
+        text = setup_tracks._manual_import_instructions()
+        assert expected in text and absent not in text and REAL_ARACHNO_SF2_NAME in text
 
     def test_no_sforzando(self, fake_repo, monkeypatch):
         printed = []
