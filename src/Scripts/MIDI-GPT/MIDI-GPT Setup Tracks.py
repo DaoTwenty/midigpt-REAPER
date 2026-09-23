@@ -36,12 +36,15 @@ alone.
 
 import sys
 import base64
+import glob
 import os
 import platform
+import shutil
 import struct
 import subprocess
 import time
 import zlib
+from xml.sax.saxutils import escape as xml_escape
 
 from reaper_python import *
 # GM_INTERNAL_NAMES/GM_NAME_TO_INSTRUMENT live in midi_extraction.py (also
@@ -59,46 +62,73 @@ EXT_STATE_SECTION = "MIDI-GPT"
 # Fully-automatic Sforzando+Arachno instrument generation -- no template
 # track, no clone source, no manual per-instrument setup, ever.
 #
-# Sforzando's SF2-import state turns out to be a small, plain-text XML blob
-# (Aria Engine's "AriaSave" format), not an opaque binary blob and not an
-# absolute file path -- it references the SoundFont by a sanitized filename
-# plus bank/program, e.g.:
-#   sf2/Arachno_SoundFont_-_Version_1_0_sf2/000/000_Grand_Piano
-# Reverse-engineered from one real captured FX chunk (Sforzando with
-# Arachno.sf2 imported, GM program 0 selected, via REAPER's own
-# GetTrackStateChunk). That means the exact same XML -- with just the
-# bank/program/name swapped -- selects any of Arachno's 138 presets, so a
-# fully configured instance can be built from scratch for any GM program,
-# with no dependency on any pre-existing track. See ARACHNO_MELODIC_NAMES
+# Sforzando's state is a small, plain-text XML blob (Aria Engine's
+# "AriaSave" format) whose one <Slot> says what's loaded. Reverse-engineered
+# from real captured FX chunks (via REAPER's GetTrackStateChunk / saved
+# projects), it can reference an instrument two ways:
+#   - By Aria bank: name="sf2/Arachno_SoundFont_-_Version_1_0_sf2/000/000_Grand_Piano"
+#     bankId="4000". Bank 4000 is whatever folder Aria's own SF2 import last
+#     converted into (its global "Converted_path" setting) -- so this only
+#     resolves on a machine where Arachno was imported into Sforzando by
+#     hand at least once, and breaks again if the user later imports any
+#     other SoundFont. Aria logs "... from bank:4000 was not found!" and the
+#     instrument stays silent.
+#   - By file: name="C:/.../000/000_Grand_Piano.sfz" bankId="-1" -- an
+#     absolute path to a converted .sfz, independent of Aria's bank state.
+# This script uses the file form: it converts Arachno.sf2 into .sfz presets
+# itself, once, with Aria's own converter (see ensure_arachno_sfz), into
+# <repo>/soundfonts/sfz/ -- deliberately not Aria's ARIAConverted folder,
+# so it never interacts with Aria's own import state. Where Aria's
+# converter can't be found or its output doesn't check out (see
+# _find_aria_converter, ensure_arachno_sfz), it falls back to the bank form
+# -- only if that bank actually holds Arachno, i.e. after a manual import;
+# otherwise it adds nothing and says how to do that import (see
+# prepare_instrument_setup).
+#
+# Either way the rest of the XML is identical, so any of Arachno's presets
+# can be selected by swapping the slot reference -- see ARACHNO_MELODIC_NAMES
 # below for the preset name table, extracted directly from Arachno.sf2's
 # own phdr (preset header) chunk -- standard SF2/RIFF format, not guessed.
 #
-# The REAPER-side chunk format wrapping that XML (the base64 "header" and
-# "CEGP"-tagged block below) was captured from that same real FX chunk and
-# is fixed/reused as-is -- only the XML payload (and the one length field
-# that has to match its size) changes per instrument. This has been
-# verified to round-trip byte-for-byte (decode -> rebuild -> decode gives
-# back identical content) but has NOT been tested against a running
-# REAPER+Sforzando -- if a generated instrument doesn't produce sound,
-# that's the first thing to suspect.
+# The XML is wrapped as a "CEGP"-tagged, zlib-compressed blob (Sforzando's
+# own plugin state, the same in its VST2 and VST3 builds), inside REAPER's
+# per-format FX chunk wrapper -- see _SFZ_FORMATS. Both wrappers were
+# captured from real chunks; the VST3 one rebuilds byte-for-byte from its
+# blob (verified against two real Windows captures).
 # ---------------------------------------------------------------------------
 
-# Captured once from a real Sforzando FX chunk; the 4-byte field at
-# _SFZ_HEADER_LEN_OFFSET is the only part of this that changes per
-# instrument (it's the byte length of the CEGP block that follows).
-_SFZ_HEADER_B64 = "UUdMUO5e7f4AAAAAAgAAAAEAAAAAAAAAAgAAAAAAAACxAQAAAQAAAAAAAAA="
-_SFZ_HEADER_LEN_OFFSET = 32
 _SFZ_CEGP_TAG = b"CEGP"
-_SFZ_VST_HEADER_LINE = (
-    '    <VST "VSTi: sforzando (Plogue Art et Technologie, Inc)" sforzando.vst 0 "" '
-    '1347176273<5C5CA79682FC437AB6539BA204BAB349> ""'
-)
+_SFZ_PLUGIN_UID = "5C5CA79682FC437AB6539BA204BAB349"
+
+# REAPER's FX chunk wrapper, per plugin format.
+#   VST2 (captured on macOS): a fixed 44-byte header whose u32 at offset 32
+#     is the CEGP blob's length, followed by the blob itself.
+#   VST3 (captured on Windows): the same header layout (VST3 plugin id,
+#     REAPER's 0xFEED5EEE magic, pin config), with the u32 at offset 32 the
+#     body length; body = [len(blob)+8, 1, 0, len(blob)] + blob + 8 zero
+#     bytes; then a final line of 6 zero bytes.
+_SFZ_FORMATS = {
+    "vst2": {
+        "line": '    <VST "VSTi: sforzando (Plogue Art et Technologie, Inc)" sforzando.vst 0 "" '
+                f'1347176273<{_SFZ_PLUGIN_UID}> ""',
+        "header_b64": "UUdMUO5e7f4AAAAAAgAAAAEAAAAAAAAAAgAAAAAAAACxAQAAAQAAAAAAAAA=",
+    },
+    "vst3": {
+        "line": '    <VST "VST3i: sforzando (Plogue Art et Technologie, Inc)" sforzando.vst3 0 "" '
+                f'395535903{{{_SFZ_PLUGIN_UID}}} ""',
+        "header_b64": "H2aTF+5e7f4AAAAAAgAAAAEAAAAAAAAAAgAAAAAAAAAAAAAAAQAAAP//AAA=",
+    },
+}
+_SFZ_HEADER_LEN_OFFSET = 32
+
+# Where ensure_arachno_sfz converts Arachno.sf2 to, under <repo>/soundfonts/.
+_SFZ_DIR_NAME = "sfz"
 
 _ARIA_XML_TEMPLATE = (
     '<?xml version="1.0" ?>\n'
     '<AriaSave version="1982" productID="1014">\n'
     '    <Settings quality="1" streaming="32" MIDIOutMode="1" automationSlot="0" liveMode="0" sc="4" scala="01 - equal.scl" scalaCenter="60" globalTuning="0" />\n'
-    '    <Slot id="0" name="{slot_name}" bankId="4000" version="0" channel="-1" poly="64" tuning="0" pb_range="-1" ptrans="0" mtrans="0" moctave="0" sc="3" mute="0">\n'
+    '    <Slot id="0" name="{slot_name}" bankId="{bank_id}" version="0" channel="-1" poly="64" tuning="0" pb_range="-1" ptrans="0" mtrans="0" moctave="0" sc="3" mute="0">\n'
     + "".join(f'        <Main id="{i}" value="{1 if i == 0 else 0}" />\n' for i in range(16))
     + '    </Slot>\n'
     '    <EffectSlot id="0" sc="4" name="Ambience" bankId="1014" version="1949" procMode="0" />\n'
@@ -151,95 +181,265 @@ ARACHNO_MELODIC_NAMES = [
 ARACHNO_DRUM_KIT = (128, 0, "Standard Drum Kit")
 
 def _sanitize_aria_name(name):
-    """Aria's own name sanitizer, as used in its SoundFont/preset slot
-    references -- confirmed against two real captured examples now: space
-    and '.' become '_' (e.g. 'Grand Piano' -> 'Grand_Piano', and the
-    SoundFont filename 'Arachno SoundFont - Version 1.0.sf2' ->
-    'Arachno_SoundFont_-_Version_1_0_sf2' -- note the literal '-' survives
-    unchanged); '&' survives as a literal '&' in the *name itself*, but
-    gets XML-entity-escaped to '&amp;' (captured from a real project after
-    program 87, "Bass & Lead", loaded with no preset selected in Sforzando
-    -- an unresolvable slot name just leaves the instrument on nothing, no
-    error anywhere -- the real slot name is
-    '.../087_Bass_&amp;_Lead', i.e. XML escaping because this string is
-    embedded straight into _ARIA_XML_TEMPLATE's name="..." attribute, not
-    a special case of Aria's own sanitizer).
+    """Aria's own name sanitizer, as used both in its bank slot references
+    and in the file/folder names its converter writes -- confirmed against
+    real captured slot names and the converter's actual output: space and
+    '.' become '_' (e.g. 'Grand Piano' -> 'Grand_Piano', and the SoundFont
+    filename 'Arachno SoundFont - Version 1.0.sf2' ->
+    'Arachno_SoundFont_-_Version_1_0_sf2' -- the literal '-' survives), and
+    everything else is left as-is, including '&', '(' and ')' (the
+    converter writes '087_Bass_&_Lead.sfz', '015_Dulcimer_(Santur).sfz').
+    Raw text, not XML -- see _xml_attr for escaping it into the AriaSave
+    XML (where '&' becomes '&amp;', as in real captured slot names)."""
+    return name.replace(" ", "_").replace(".", "_")
 
-    An earlier version of this also mapped '(' and ')' to '_', guessed
-    (wrongly, per the above) at the same time as the '&' fix -- reverted,
-    since '(' / ')' aren't XML-special and there's no evidence they need
-    any transformation at all. Only 3 of the 128 melodic Arachno names
-    contain any of '&'/'('/')' ('Dulcimer (Santur)' at 15, 'Bass & Lead' at
-    87, 'Fantasia (New Age)' at 88) -- if 15 or 88 still don't sound right,
-    that's still genuinely unconfirmed and worth capturing for real."""
-    return name.replace(" ", "_").replace(".", "_").replace("&", "&amp;")
+def _xml_attr(value):
+    """Escape a string for an XML attribute value in _ARIA_XML_TEMPLATE."""
+    return xml_escape(value, {'"': "&quot;"})
+
+def _repo_dir():
+    # This file lives at <repo>/src/Scripts/MIDI-GPT/ -- four levels down
+    # from <repo> itself (it's loaded through a symlink/junction from
+    # REAPER's Scripts folder, so realpath() is needed to resolve back to it).
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.realpath(__file__)))))
+
+def _soundfonts_dir():
+    return os.path.join(_repo_dir(), "soundfonts")
 
 def _find_arachno_sf2_name():
-    """The exact filename of the Arachno SoundFont install.sh downloads
-    into <repo>/soundfonts/ (see download_arachno_soundfont in install.sh)
-    -- read directly off disk rather than hardcoded, so this keeps working
-    even if Arachnosoft ever ships a differently-named file. Returns None
-    if it's not there yet."""
-    # This file lives at <repo>/src/Scripts/MIDI-GPT/ -- four levels down
-    # from <repo> itself (it's loaded through a symlink from REAPER's
-    # Scripts folder, so realpath() is needed to resolve back to it).
-    repo_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
-        os.path.realpath(__file__)))))
-    soundfont_dir = os.path.join(repo_dir, "soundfonts")
+    """The exact filename of the Arachno SoundFont the installer downloads
+    into <repo>/soundfonts/ -- read directly off disk rather than
+    hardcoded, so this keeps working even if Arachnosoft ever ships a
+    differently-named file. Returns None if it's not there yet."""
     try:
-        for entry in sorted(os.listdir(soundfont_dir)):
+        for entry in sorted(os.listdir(_soundfonts_dir())):
             if entry.lower().endswith(".sf2"):
                 return entry
     except OSError:
         pass
     return None
 
+def _arachno_preset(instrument):
+    """(bank, program, Arachno preset name) for a GM instrument 0-127, or
+    128 for drums."""
+    if instrument == 128:
+        return ARACHNO_DRUM_KIT
+    return 0, instrument, ARACHNO_MELODIC_NAMES[instrument]
+
 def _arachno_slot_name(bank, program, preset_name):
+    """Aria bank 4000 reference (see the module comment) -- raw, not
+    XML-escaped. None if the SoundFont isn't downloaded."""
     sf2_name = _find_arachno_sf2_name()
     if sf2_name is None:
         return None
     return f"sf2/{_sanitize_aria_name(sf2_name)}/{bank:03d}/{program:03d}_{_sanitize_aria_name(preset_name)}"
 
-def _build_sforzando_vst_block(instrument):
-    """The '<VST ...> ... >' block text for a Sforzando instance with
-    Arachno.sf2 loaded and the given GM instrument (0-127, or 128 for
-    drums) already selected -- see the module-level comment above for how
-    this is derived. Indented to sit directly inside an <FXCHAIN> block.
-    Returns None if the Arachno SoundFont hasn't been downloaded yet (see
-    install.sh)."""
-    if instrument == 128:
-        bank, program, name = ARACHNO_DRUM_KIT
-    else:
-        bank, program, name = 0, instrument, ARACHNO_MELODIC_NAMES[instrument]
-    slot_name = _arachno_slot_name(bank, program, name)
-    if slot_name is None:
+def _arachno_sfz_root():
+    """Where ensure_arachno_sfz's conversion puts Arachno's .sfz presets:
+    <repo>/soundfonts/sfz/<sanitized .sf2 name>/ (the converter names that
+    last folder itself). None if the SoundFont isn't downloaded."""
+    sf2_name = _find_arachno_sf2_name()
+    if sf2_name is None:
         return None
-    xml = _ARIA_XML_TEMPLATE.format(slot_name=slot_name)
+    return os.path.join(_soundfonts_dir(), _SFZ_DIR_NAME, _sanitize_aria_name(sf2_name))
 
-    compressed = zlib.compress(xml.encode("utf-8"), 9)
-    cegp_blob = _SFZ_CEGP_TAG + struct.pack("<I", len(xml)) + compressed
+def _arachno_sfz_path(bank, program, preset_name):
+    """Absolute path to one converted .sfz preset, with forward slashes as
+    Sforzando itself saves it. None if the SoundFont isn't downloaded."""
+    root = _arachno_sfz_root()
+    if root is None:
+        return None
+    path = os.path.join(root, f"{bank:03d}", f"{program:03d}_{_sanitize_aria_name(preset_name)}.sfz")
+    return path.replace("\\", "/")
 
-    header = bytearray(base64.b64decode(_SFZ_HEADER_B64))
-    struct.pack_into("<I", header, _SFZ_HEADER_LEN_OFFSET, len(cegp_blob))
+# ---------------------------------------------------------------------------
+# One-time .sf2 -> .sfz conversion, with Aria's own converter
+# ---------------------------------------------------------------------------
 
-    b64_header = base64.b64encode(bytes(header)).decode()
-    b64_body = base64.b64encode(cegp_blob).decode()
-    body_lines = [b64_body[i:i + 128] for i in range(0, len(b64_body), 128)]
+def _find_aria_converter():
+    """Path to Aria's SoundFont converter (Plogue's RIFF2sfz), installed
+    alongside Sforzando, or None. On Windows, Aria registers it under
+    HKLM\\SOFTWARE\\Plogue Art et Technologie, Inc\\Aria\\Converters. Where
+    it lives on macOS hasn't been confirmed yet, so there this returns None
+    and Setup Tracks falls back to Aria's bank reference."""
+    if platform.system() != "Windows":
+        return None
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                            r"SOFTWARE\Plogue Art et Technologie, Inc\Aria\Converters",
+                            0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as key:
+            path = winreg.QueryValueEx(key, "sf2")[0]
+    except OSError:
+        return None
+    return path if os.path.isfile(path) else None
 
-    lines = [_SFZ_VST_HEADER_LINE, f"      {b64_header}"]
-    lines += [f"      {ln}" for ln in body_lines]
-    lines.append("    >")
+def _sfz_conversion_complete(root):
+    """Whether root holds a converted Arachno: the sample file every preset
+    shares, plus the default melodic and drum presets. (A partial tree
+    can't end up here -- ensure_arachno_sfz converts into a scratch folder
+    and only moves the result into place once this check passes on it.)"""
+    return all(os.path.isfile(os.path.join(root, *parts)) for parts in (
+        ("sf2_smpl.wav",),
+        ("000", "000_Grand_Piano.sfz"),
+        ("128", "000_Standard_Drum_Kit.sfz"),
+    ))
+
+def ensure_arachno_sfz():
+    """Make sure Arachno's .sfz presets exist under <repo>/soundfonts/sfz/,
+    converting the .sf2 once with Aria's own converter if needed -- the same
+    conversion Sforzando runs on a manual import, but into this repo's own
+    folder and without touching Aria's settings. Returns (True, None) when
+    ready, or (False, reason) when not (callers fall back to Aria's bank
+    reference)."""
+    sf2_name = _find_arachno_sf2_name()
+    if sf2_name is None:
+        return False, "the Arachno SoundFont isn't downloaded (re-run the installer)"
+    root = _arachno_sfz_root()
+    if _sfz_conversion_complete(root):
+        return True, None
+
+    converter = _find_aria_converter()
+    if converter is None:
+        return False, "Aria's SoundFont converter wasn't found (it's installed with Sforzando)"
+
+    print("Converting the Arachno SoundFont for Sforzando (one-time, a few seconds)...\n")
+    out_dir = os.path.join(_soundfonts_dir(), _SFZ_DIR_NAME)
+    work_dir = os.path.join(_soundfonts_dir(), f"{_SFZ_DIR_NAME}.converting")
+    shutil.rmtree(work_dir, ignore_errors=True)
+    os.makedirs(work_dir)
+    try:
+        # Same arguments Sforzando passes (seen in Aria's own log): the .sf2,
+        # an output folder, and a file it writes the list of presets to.
+        result = subprocess.run(
+            [converter, os.path.join(_soundfonts_dir(), sf2_name), work_dir,
+             os.path.join(work_dir, "presets.ariac")],
+            capture_output=True, timeout=600,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        converted_root = os.path.join(work_dir, os.path.basename(root))
+        if result.returncode != 0 or not _sfz_conversion_complete(converted_root):
+            return False, f"Aria's SoundFont converter failed (exit code {result.returncode})"
+        # Converted into a scratch folder first, then moved into place, so an
+        # interrupted run never leaves a half-written tree that looks finished.
+        shutil.rmtree(root, ignore_errors=True)
+        os.makedirs(out_dir, exist_ok=True)
+        shutil.move(converted_root, root)
+    except (OSError, subprocess.SubprocessError) as e:
+        return False, f"converting the Arachno SoundFont failed ({e})"
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+    return True, None
+
+def _aria_bank_has_arachno():
+    """Whether Aria's bank 4000 (its last manual SF2 import -- see the
+    module comment) currently holds Arachno, i.e. whether the bank-reference
+    fallback would actually produce sound. True/False on Windows, where
+    Aria keeps the bank's folder in the registry (Converted_path); None
+    where that can't be checked (macOS: where Aria keeps it isn't
+    confirmed)."""
+    if platform.system() != "Windows":
+        return None
+    sf2_name = _find_arachno_sf2_name()
+    if sf2_name is None:
+        return False
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Plogue Art et Technologie, Inc\Aria") as key:
+            converted_path = winreg.QueryValueEx(key, "Converted_path")[0]
+    except OSError:
+        return False
+    return os.path.isfile(os.path.join(
+        converted_path, "sf2", _sanitize_aria_name(sf2_name), "000", "000_Grand_Piano.sfz"))
+
+def _manual_import_instructions():
+    sf2_name = _find_arachno_sf2_name() or "the Arachno .sf2"
+    return ("To set it up by hand, once: add Sforzando to any track, drag\n"
+            f"  {os.path.join(_soundfonts_dir(), sf2_name)}\n"
+            "onto Sforzando's window (it converts the SoundFont -- a few seconds), "
+            "then run Setup Tracks again.")
+
+# ---------------------------------------------------------------------------
+# Which Sforzando build REAPER has
+# ---------------------------------------------------------------------------
+
+def _sforzando_plugin_format():
+    """'vst3' or 'vst2' -- whichever Sforzando build REAPER has actually
+    scanned (its reaper-vstplugins*.ini caches), preferring the build each
+    platform's chunk format was captured from: VST2 on macOS, VST3
+    elsewhere (Sforzando's Windows installer puts its VST2 in a folder
+    REAPER doesn't scan by default). None if REAPER hasn't found Sforzando
+    at all. If the caches can't be read, assumes that preferred build."""
+    preferred, other = ("vst2", "vst3") if platform.system() == "Darwin" else ("vst3", "vst2")
+    found = set()
+    caches = glob.glob(os.path.join(RPR_GetResourcePath(), "reaper-vstplugins*.ini"))
+    for cache in caches:
+        try:
+            with open(cache, encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    key = line.split("=", 1)[0].strip().lower()
+                    if key == "sforzando.vst3":
+                        found.add("vst3")
+                    elif key == "sforzando.vst":
+                        found.add("vst2")
+        except OSError:
+            continue
+    if not caches:
+        return preferred
+    for fmt in (preferred, other):
+        if fmt in found:
+            return fmt
+    return None
+
+# ---------------------------------------------------------------------------
+# Chunk building
+# ---------------------------------------------------------------------------
+
+def _instrument_slot(instrument, use_sfz_files):
+    """(slot name, bankId) for a GM instrument -- a converted .sfz file
+    path (bankId -1) if use_sfz_files, else Aria's bank reference (bankId
+    4000). None if the SoundFont isn't downloaded."""
+    bank, program, name = _arachno_preset(instrument)
+    if use_sfz_files:
+        path = _arachno_sfz_path(bank, program, name)
+        return None if path is None else (path, -1)
+    slot = _arachno_slot_name(bank, program, name)
+    return None if slot is None else (slot, 4000)
+
+def _build_sforzando_vst_block(slot_name, bank_id, plugin_format):
+    """The '<VST ...> ... >' block text for a Sforzando instance with the
+    given slot loaded (see _instrument_slot), in REAPER's chunk format for
+    that plugin build (see _SFZ_FORMATS). Indented to sit directly inside
+    an <FXCHAIN> block."""
+    fmt = _SFZ_FORMATS[plugin_format]
+    xml = _ARIA_XML_TEMPLATE.format(slot_name=_xml_attr(slot_name), bank_id=bank_id)
+    xml_bytes = xml.encode("utf-8")
+    cegp_blob = _SFZ_CEGP_TAG + struct.pack("<I", len(xml_bytes)) + zlib.compress(xml_bytes, 9)
+
+    if plugin_format == "vst3":
+        body = struct.pack("<4I", len(cegp_blob) + 8, 1, 0, len(cegp_blob)) + cegp_blob + bytes(8)
+        tail = [base64.b64encode(bytes(6)).decode()]
+    else:
+        body = cegp_blob
+        tail = []
+    header = bytearray(base64.b64decode(fmt["header_b64"]))
+    struct.pack_into("<I", header, _SFZ_HEADER_LEN_OFFSET, len(body))
+
+    b64_body = base64.b64encode(body).decode()
+    b64_lines = [base64.b64encode(bytes(header)).decode()]
+    b64_lines += [b64_body[i:i + 128] for i in range(0, len(b64_body), 128)]
+    b64_lines += tail
+
+    lines = [fmt["line"]] + [f"      {ln}" for ln in b64_lines] + ["    >"]
     return "\n".join(lines)
 
-def _build_source_track_chunk(track_name, instrument):
-    """A minimal, self-contained TRACK chunk with just Sforzando+Arachno as
-    its FX chain -- for a brand new, throwaway track (see
+def _build_source_track_chunk(track_name, vst_block):
+    """A minimal, self-contained TRACK chunk with just the given Sforzando
+    block as its FX chain -- for a brand new, throwaway track (see
     get_or_create_instrument_source). Never applied to a track that already
-    has content: SetTrackStateChunk replaces the *whole* track. Returns
-    None if the SoundFont isn't downloaded yet (see _build_sforzando_vst_block)."""
-    vst_block = _build_sforzando_vst_block(instrument)
-    if vst_block is None:
-        return None
+    has content: SetTrackStateChunk replaces the *whole* track."""
     return (
         "<TRACK\n"
         f"  NAME {track_name}\n"
@@ -455,25 +655,59 @@ def is_sforzando(track, fx_index):
 # FX chain, never the destination track's items/name/etc.), then deleted.
 # ---------------------------------------------------------------------------
 
-def get_or_create_instrument_source(source_pool, instrument):
+def prepare_instrument_setup():
+    """Once per run, before any instrument is added: which Sforzando build
+    to generate chunks for, and whether the converted .sfz presets are
+    available (converting them now if needed -- see ensure_arachno_sfz).
+    Returns a dict for get_or_create_instrument_source, or None (after
+    saying why) if Sforzando isn't available to REAPER at all."""
+    plugin_format = _sforzando_plugin_format()
+    if plugin_format is None:
+        print("Sforzando isn't in REAPER's plugin list -- install it (see VST.md), then in REAPER: "
+              "Options > Preferences > Plug-ins > VST > Re-scan.\n")
+        return None
+    use_sfz_files, reason = ensure_arachno_sfz()
+    if use_sfz_files:
+        return {"plugin_format": plugin_format, "use_sfz_files": True}
+
+    # Fallback: Aria's own bank, as filled by a manual import into
+    # Sforzando -- only worth using if it actually holds Arachno.
+    if _find_arachno_sf2_name() is None:
+        print(f"Can't add instruments: {reason}.\n")
+        return None
+    bank_ready = _aria_bank_has_arachno()
+    if bank_ready is False:
+        print(f"Can't add instruments with sound yet: {reason}.\n{_manual_import_instructions()}\n")
+        return None
+    if bank_ready is None:
+        print(f"Note: {reason}, so instruments use Sforzando's imported copy of Arachno. "
+              f"If they play no sound, Arachno hasn't been imported yet.\n{_manual_import_instructions()}\n")
+    return {"plugin_format": plugin_format, "use_sfz_files": False}
+
+def get_or_create_instrument_source(source_pool, instrument, setup):
     """Return a throwaway track whose only FX is a correctly configured
     Sforzando+Arachno instance for `instrument`, creating and caching one
     per distinct instrument the first time it's needed (source_pool is a
     plain dict the caller owns and cleans up via
-    cleanup_instrument_sources). Returns None if Sforzando couldn't be
-    instantiated (e.g. it isn't installed) -- cached too, so it's not
-    retried for every track in the same run."""
+    cleanup_instrument_sources; setup comes from prepare_instrument_setup).
+    Returns None if Sforzando couldn't be instantiated -- cached too, so
+    it's not retried for every track in the same run."""
     if instrument in source_pool:
         return source_pool[instrument]
 
-    chunk = _build_source_track_chunk("MIDI-GPT source", instrument)
+    slot = _instrument_slot(instrument, setup["use_sfz_files"])
     track = None
-    if chunk is not None:
+    if slot is not None:
+        vst_block = _build_sforzando_vst_block(slot[0], slot[1], setup["plugin_format"])
+        chunk = _build_source_track_chunk("MIDI-GPT source", vst_block)
         idx = RPR_CountTracks(0)
         RPR_InsertTrackAtIndex(idx, False)
         track = RPR_GetTrack(0, idx)
-        ok = bool(track) and RPR_SetTrackStateChunk(track, chunk, False) \
-            and RPR_TrackFX_GetInstrument(track) >= 0
+        fx = RPR_TrackFX_GetInstrument(track) if track and RPR_SetTrackStateChunk(track, chunk, False) else -1
+        # An FX slot alone isn't proof: REAPER keeps a placeholder slot for
+        # a plugin it can't find (e.g. a chunk naming a build that isn't
+        # installed), with no parameters behind it.
+        ok = fx >= 0 and RPR_TrackFX_GetNumParams(track, fx) > 0
         if ok:
             # Give Sforzando's own (separately async) chunk restore a
             # moment to settle before anything copies off of it -- copying
@@ -493,7 +727,7 @@ def cleanup_instrument_sources(source_pool):
             RPR_DeleteTrack(track)
     source_pool.clear()
 
-def ensure_instrument(track, instrument, source_pool):
+def ensure_instrument(track, instrument, source_pool, setup):
     """Add Sforzando+Arachno to `track` with the correct GM program already
     selected -- entirely generated (see get_or_create_instrument_source),
     no template/clone-source track to set up, no manual work, ever. Only
@@ -513,10 +747,12 @@ def ensure_instrument(track, instrument, source_pool):
     if instrument is None:
         return "no instrument -- couldn't resolve this track's GM instrument"
 
-    source = get_or_create_instrument_source(source_pool, instrument)
+    if setup is None:
+        return "not added -- see the message above"
+    source = get_or_create_instrument_source(source_pool, instrument, setup)
     if source is None:
-        return ("FAILED to add Sforzando+Arachno -- make sure Sforzando is installed and "
-                "the Arachno SoundFont has been downloaded (re-run install.sh) (see VST.md)")
+        return ("FAILED to add Sforzando+Arachno -- Sforzando didn't load, or the Arachno "
+                "SoundFont hasn't been downloaded (re-run the installer) (see VST.md)")
 
     source_fx = RPR_TrackFX_GetInstrument(source)
     dest_idx = RPR_TrackFX_GetCount(track)
@@ -547,6 +783,7 @@ def apply_track_setup(tracks, instruments, name_only=False, replace_existing=Fal
     alone, same as ensure_instrument's own ownership-respecting check."""
     print(f"Configuring {len(tracks)} track(s)...\n")
 
+    setup = None if name_only else prepare_instrument_setup()
     source_pool = {}
     RPR_Undo_BeginBlock()
     try:
@@ -566,7 +803,7 @@ def apply_track_setup(tracks, instruments, name_only=False, replace_existing=Fal
                 if existing_fx >= 0:
                     RPR_TrackFX_Delete(track, existing_fx)
 
-            inst_result = ensure_instrument(track, instrument, source_pool)
+            inst_result = ensure_instrument(track, instrument, source_pool, setup)
             print(f"{name}: {inst_result}; {instrument_note}")
     finally:
         cleanup_instrument_sources(source_pool)

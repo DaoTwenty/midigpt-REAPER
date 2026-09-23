@@ -9,6 +9,9 @@
 #     js_ReaScriptAPI) -- see install.sh's ReaPack/ReaImGui step
 #   - ReaPack itself (extension + its registry/cache)
 #   - The Arachno SoundFont this installer downloads
+#   - Its converted .sfz presets: Setup Tracks' own (soundfonts/sfz) and
+#     Aria's from a manual import (soundfonts/ARIAConverted, plus Aria's
+#     pointer to that folder)
 #   - Sforzando's plugin files, best-effort (it's a real app you install by
 #     hand -- this only removes plugin bundles it can find, not any
 #     system installer receipt)
@@ -187,6 +190,75 @@ if find "$ARACHNO_DIR" -iname "*.sf2" 2>/dev/null | grep -q .; then
     fi
 else
     info "No SoundFont found in $ARACHNO_DIR"
+fi
+
+# ============================================================================
+# Aria's converted SoundFont cache
+# ============================================================================
+# The first time a .sf2 is imported into Sforzando, its Aria engine converts
+# it (Plogue's RIFF2sfz) into .sfz presets in an ARIAConverted/ folder next
+# to the .sf2, and remembers that folder as its "Converted_path" -- loaded as
+# Aria bank 4000, which is what Setup Tracks' generated instruments refer
+# to. Remove both to get back to a machine where Arachno was never imported.
+# Converted_path is Aria-global, so it's only cleared when it points at
+# *this* repo's folder, never at some other SoundFont the user imported.
+
+step "Converted SoundFont presets (soundfonts/sfz, ARIAConverted)"
+
+# soundfonts/sfz is Setup Tracks' own one-time conversion (see
+# ensure_arachno_sfz in MIDI-GPT Setup Tracks.py); ARIAConverted is Aria's,
+# from a manual import into Sforzando.
+SFZ_DIR="$ARACHNO_DIR/sfz"
+if [ -d "$SFZ_DIR" ]; then
+    if confirm "Remove $SFZ_DIR (Setup Tracks' converted presets)?"; then
+        rm -rf "$SFZ_DIR"
+        rmdir "$ARACHNO_DIR" 2>/dev/null || true
+        ok "Removed $SFZ_DIR"
+    fi
+else
+    info "No soundfonts/sfz folder found"
+fi
+
+ARIA_CONVERTED="$ARACHNO_DIR/ARIAConverted"
+if [ -d "$ARIA_CONVERTED" ]; then
+    if confirm "Remove $ARIA_CONVERTED?"; then
+        rm -rf "$ARIA_CONVERTED"
+        rmdir "$ARACHNO_DIR" 2>/dev/null || true
+        ok "Removed $ARIA_CONVERTED"
+    fi
+else
+    info "No ARIAConverted folder found"
+fi
+
+# Aria stores Converted_path in the registry on Windows. On macOS the key
+# name is the same, but which preferences domain holds it isn't confirmed,
+# so every Plogue domain is checked for it.
+if [ "$PLATFORM" = "windows" ]; then
+    ARIA_KEY='HKCU\Software\Plogue Art et Technologie, Inc\Aria'
+    ARIA_PATH="$(reg query "$ARIA_KEY" //v Converted_path 2>/dev/null | sed -n 's/.*REG_SZ[[:space:]]*//p')"
+    if [ -n "$ARIA_PATH" ]; then
+        if [[ "$(cygpath -u "$ARIA_PATH" 2>/dev/null)" == "$ARIA_CONVERTED"* ]]; then
+            if confirm "Clear Aria's Converted_path ($ARIA_PATH)?"; then
+                reg delete "$ARIA_KEY" //v Converted_path //f >/dev/null && ok "Cleared Aria's Converted_path"
+            fi
+        else
+            info "Aria's Converted_path points elsewhere ($ARIA_PATH) -- left alone"
+        fi
+    fi
+elif [ "$PLATFORM" = "macos" ]; then
+    for plist in "$HOME"/Library/Preferences/*[Pp]logue*.plist; do
+        [ -f "$plist" ] || continue
+        domain="$(basename "$plist" .plist)"
+        ARIA_PATH="$(defaults read "$domain" Converted_path 2>/dev/null || true)"
+        [ -n "$ARIA_PATH" ] || continue
+        if [[ "$ARIA_PATH" == "$ARIA_CONVERTED"* ]]; then
+            if confirm "Clear Aria's Converted_path in $domain ($ARIA_PATH)?"; then
+                defaults delete "$domain" Converted_path && ok "Cleared Converted_path in $domain"
+            fi
+        else
+            info "Converted_path in $domain points elsewhere ($ARIA_PATH) -- left alone"
+        fi
+    done
 fi
 
 # ============================================================================
