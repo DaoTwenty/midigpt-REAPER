@@ -161,6 +161,8 @@ Every track gets an **I** (Ignore — exclude this track entirely) and an **A** 
 
 **Setup Tracks** / **Setup Selected Tracks** detects each track's GM instrument straight from its MIDI content (channel 10 → drums, otherwise its first Program Change event) and adds a ready-to-play Sforzando + Arachno instance for it — no manual synth routing, no template tracks. Tracks it can't resolve automatically can be confirmed or overridden individually. See [INSTRUMENTS.md](INSTRUMENTS.md) for the full instrument name/keyword reference, and [VST.md](VST.md) for how the automatic setup works under the hood. `MIDI-GPT Replace Instruments.py` force-replaces whatever instrument is on selected tracks, for when you want to redo one by hand.
 
+This automatic setup only recognizes Sforzando's **VST or VST3** build in REAPER's plugin list — when installing Sforzando, make sure REAPER has scanned one of those. **AU and CLAP are not supported** (its installer also offers them, but Setup Tracks has no FX chunk format for either). If Setup Tracks reports Sforzando isn't in REAPER's plugin list, check **Options > Preferences > Plug-ins > VST** and rescan.
+
 ### Hint Mode, Themes, Settings
 
 Open **Settings** from the dashboard's top row to toggle hover hints (off by default — turns on a one-line explanation for whatever control you're hovering) and pick a theme: Dark (default), Light, Midnight, Solarized, Forest, Ocean, or Metacreation.

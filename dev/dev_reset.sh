@@ -273,9 +273,11 @@ if [ "$PLATFORM" = "macos" ]; then
         "/Library/Audio/Plug-Ins/VST/sforzando.vst"
         "/Library/Audio/Plug-Ins/VST3/sforzando.vst3"
         "/Library/Audio/Plug-Ins/Components/sforzando.component"
+        "/Library/Audio/Plug-Ins/CLAP/Plogue/sforzando.clap"
         "$HOME/Library/Audio/Plug-Ins/VST/sforzando.vst"
         "$HOME/Library/Audio/Plug-Ins/VST3/sforzando.vst3"
         "$HOME/Library/Audio/Plug-Ins/Components/sforzando.component"
+        "$HOME/Library/Audio/Plug-Ins/CLAP/Plogue/sforzando.clap"
     )
 elif [ "$PLATFORM" = "windows" ]; then
     SFZ_PATHS=(

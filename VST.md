@@ -6,6 +6,8 @@ This is the default, and what most people should just use.
 
 **Setup:** the installer (`install.sh`/`install.ps1`) downloads the Arachno GM SoundFont directly into this repo's own `soundfonts/` folder, and opens Sforzando's download page for you (it's a real application installer, not a data file, so it can't be installed on your behalf the way Arachno can). See the main [README](README.md#installation). Once both are in place, no further manual setup is needed — no importing the `.sf2` by hand, no building an FX chain, no per-instrument presets.
 
+When Sforzando's installer asks which plugin formats to install, pick **VST or VST3** — Setup Tracks builds REAPER's FX chunk for one of those two. **AU and CLAP are not supported**, by design, not just untested: Setup Tracks has no FX chunk format for either, so an AU- or CLAP-only install leaves it reporting Sforzando isn't in REAPER's plugin list even though it's installed.
+
 **Using it:** from the dashboard (`MIDI-GPT.py`),
 - **Setup Tracks** — detects each track's GM instrument from its MIDI content (channel 10 → drums, otherwise its first Program Change event) and adds a fresh Sforzando+Arachno instance with the correct GM program already selected, for any track that doesn't have an instrument yet. Safe to re-run: it never touches a track's instrument unless it added it in the first place.
 - **Setup Selected Tracks** — same thing, scoped to the current selection instead of the whole project.

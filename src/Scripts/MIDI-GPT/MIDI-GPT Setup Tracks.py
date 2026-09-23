@@ -257,23 +257,48 @@ def _arachno_sfz_path(bank, program, preset_name):
 # One-time .sf2 -> .sfz conversion, with Aria's own converter
 # ---------------------------------------------------------------------------
 
+def _macos_aria_plist():
+    """Parsed contents of Aria's macOS preferences
+    (~/Library/Preferences/com.plogue.aria.plist -- confirmed on a real
+    install: holds 'base_dir' (Aria's install folder, e.g.
+    "/Library/Application Support/Plogue/Aria", where RIFF2sfz lives
+    alongside Aria.bundle) and 'Converted_path' (last manual SF2 import,
+    once one has been done). None if it can't be read."""
+    import plistlib
+    path = os.path.expanduser("~/Library/Preferences/com.plogue.aria.plist")
+    try:
+        with open(path, "rb") as f:
+            return plistlib.load(f)
+    except (OSError, plistlib.InvalidFileException):
+        return None
+
 def _find_aria_converter():
     """Path to Aria's SoundFont converter (Plogue's RIFF2sfz), installed
     alongside Sforzando, or None. On Windows, Aria registers it under
-    HKLM\\SOFTWARE\\Plogue Art et Technologie, Inc\\Aria\\Converters. Where
-    it lives on macOS hasn't been confirmed yet, so there this returns None
-    and Setup Tracks falls back to Aria's bank reference."""
-    if platform.system() != "Windows":
-        return None
-    try:
-        import winreg
-        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
-                            r"SOFTWARE\Plogue Art et Technologie, Inc\Aria\Converters",
-                            0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as key:
-            path = winreg.QueryValueEx(key, "sf2")[0]
-    except OSError:
-        return None
-    return path if os.path.isfile(path) else None
+    HKLM\\SOFTWARE\\Plogue Art et Technologie, Inc\\Aria\\Converters. On
+    macOS, it lives at <base_dir>/RIFF2sfz, next to Aria.bundle, where
+    base_dir is read from Aria's own preferences plist (confirmed on a
+    real install: RIFF2sfz 1.98, same "input output_path results.txt"
+    argument order as Windows)."""
+    system = platform.system()
+    if system == "Windows":
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE,
+                                r"SOFTWARE\Plogue Art et Technologie, Inc\Aria\Converters",
+                                0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as key:
+                path = winreg.QueryValueEx(key, "sf2")[0]
+        except OSError:
+            return None
+        return path if os.path.isfile(path) else None
+    if system == "Darwin":
+        plist = _macos_aria_plist()
+        base_dir = plist.get("base_dir") if plist else None
+        if not base_dir:
+            return None
+        path = os.path.join(base_dir, "RIFF2sfz")
+        return path if os.path.isfile(path) else None
+    return None
 
 def _sfz_conversion_complete(root):
     """Whether root holds a converted Arachno: the sample file every preset
@@ -335,22 +360,30 @@ def ensure_arachno_sfz():
 def _aria_bank_has_arachno():
     """Whether Aria's bank 4000 (its last manual SF2 import -- see the
     module comment) currently holds Arachno, i.e. whether the bank-reference
-    fallback would actually produce sound. True/False on Windows, where
-    Aria keeps the bank's folder in the registry (Converted_path); None
-    where that can't be checked (macOS: where Aria keeps it isn't
-    confirmed)."""
-    if platform.system() != "Windows":
+    fallback would actually produce sound. True/False on Windows and macOS;
+    on Windows Aria keeps the bank's folder in the registry (Converted_path),
+    on macOS in its preferences plist (same key, confirmed on a real
+    install to hold the same "<Converted_path>/sf2/<sanitized name>/..."
+    layout as Windows). None where that can't be checked."""
+    system = platform.system()
+    if system not in ("Windows", "Darwin"):
         return None
     sf2_name = _find_arachno_sf2_name()
     if sf2_name is None:
         return False
-    try:
-        import winreg
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
-                            r"Software\Plogue Art et Technologie, Inc\Aria") as key:
-            converted_path = winreg.QueryValueEx(key, "Converted_path")[0]
-    except OSError:
-        return False
+    if system == "Windows":
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                                r"Software\Plogue Art et Technologie, Inc\Aria") as key:
+                converted_path = winreg.QueryValueEx(key, "Converted_path")[0]
+        except OSError:
+            return False
+    else:
+        plist = _macos_aria_plist()
+        converted_path = plist.get("Converted_path") if plist else None
+        if not converted_path:
+            return False
     return os.path.isfile(os.path.join(
         converted_path, "sf2", _sanitize_aria_name(sf2_name), "000", "000_Grand_Piano.sfz"))
 
