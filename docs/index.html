@@ -524,6 +524,8 @@ Every track gets an **I** (Ignore — exclude this track entirely) and an **A** 
 
 **Setup Tracks** / **Setup Selected Tracks** detects each track's GM instrument straight from its MIDI content (channel 10 → drums, otherwise its first Program Change event) and adds a ready-to-play Sforzando + Arachno instance for it — no manual synth routing, no template tracks. Tracks it can't resolve automatically can be confirmed or overridden individually. See [INSTRUMENTS.md](INSTRUMENTS.md) for the full instrument name/keyword reference, and [VST.md](VST.md) for how the automatic setup works under the hood. `MIDI-GPT Replace Instruments.py` force-replaces whatever instrument is on selected tracks, for when you want to redo one by hand.
 
+This automatic setup only recognizes Sforzando's **VST or VST3** build in REAPER's plugin list — when installing Sforzando, make sure REAPER has scanned one of those. **AU and CLAP are not supported** (its installer also offers them, but Setup Tracks has no FX chunk format for either). If Setup Tracks reports Sforzando isn't in REAPER's plugin list, check **Options > Preferences > Plug-ins > VST** and rescan.
+
 ### Hint Mode, Themes, Settings
 
 Open **Settings** from the dashboard's top row to toggle hover hints (off by default — turns on a one-line explanation for whatever control you're hovering) and pick a theme: Dark (default), Light, Midnight, Solarized, Forest, Ocean, or Metacreation.
@@ -600,13 +602,6 @@ git push origin vX.Y.Z
 ```
 
 Review the draft (its notes are auto-generated, so worth a pass) and publish it from the GitHub UI, or `gh release edit vX.Y.Z --draft=false`. To build the zip locally without publishing anything: `./dev/build_release.sh`.
-
-**Before a release that touches `install.ps1`: test on a clean Windows VM.** CI can't cover this. GitHub's Windows runners come with Visual Studio (so the Visual C++ Runtime PyTorch needs is always present), Python and git preinstalled, so they never see what a fresh Windows machine does. On a clean Windows 10 or 11 VM (or Windows Sandbox) with only REAPER installed and launched once:
-
-1. Install Python 3.12 and git, then run `.\install.ps1` from a new PowerShell window.
-2. At the Visual C++ Runtime prompt, answer **n** once: the installer should stop with the download link. Then re-run, answer **Y** and accept the administrator prompt: it should install and continue.
-3. Check the log has no `[WARN]` lines other than "No published checksum for ReaImGui".
-4. In REAPER: *Options > Preferences > Plug-Ins > ReaScript* shows Python as detected, and loading `MIDI-GPT.py` opens the dashboard.
 
 ### Project Layout
 
@@ -890,6 +885,8 @@ Note: `sax` (program 64) matches first for any track name containing "sax" — `
 This is the default, and what most people should just use.
 
 **Setup:** the installer (`install.sh`/`install.ps1`) downloads the Arachno GM SoundFont directly into this repo's own `soundfonts/` folder, and opens Sforzando's download page for you (it's a real application installer, not a data file, so it can't be installed on your behalf the way Arachno can). See the main [README](README.md#installation). Once both are in place, no further manual setup is needed — no importing the `.sf2` by hand, no building an FX chain, no per-instrument presets.
+
+When Sforzando's installer asks which plugin formats to install, pick **VST or VST3** — Setup Tracks builds REAPER's FX chunk for one of those two. **AU and CLAP are not supported**, by design, not just untested: Setup Tracks has no FX chunk format for either, so an AU- or CLAP-only install leaves it reporting Sforzando isn't in REAPER's plugin list even though it's installed.
 
 **Using it:** from the dashboard (`MIDI-GPT.py`),
 - **Setup Tracks** — detects each track's GM instrument from its MIDI content (channel 10 → drums, otherwise its first Program Change event) and adds a fresh Sforzando+Arachno instance with the correct GM program already selected, for any track that doesn't have an instrument yet. Safe to re-run: it never touches a track's instrument unless it added it in the first place.
