@@ -6,8 +6,15 @@
 # by:
 #   1. Copying midigpt-REAPER into a temp directory
 #   2. Locating the sibling MIDI-GPT directory (optional -- see below)
-#   3. Running install.ps1
-#   4. Verifying imports, the REAPER Scripts junction, and unit tests pass
+#   3. Running install.ps1 (all steps, including reaper.ini configuration,
+#      against a throwaway REAPER dir)
+#   4. Verifying imports (torch included), the REAPER Scripts junction,
+#      ReaImGui, reaper.ini, that no unexpected warnings were logged, and
+#      that unit tests pass
+#
+# What this can't cover: GitHub's windows-latest runners ship with the MSVC
+# runtime preinstalled, so the missing-runtime path never runs here -- see
+# test_install_helpers.ps1 and the clean-VM checklist in README.md.
 #
 # A sibling MIDI-GPT checkout is optional -- install.ps1 installs
 # midigpt[http,inference] from PyPI first and only falls back to a sibling
@@ -88,16 +95,25 @@ try {
     Write-Host ""
 
     $InstallLog = Join-Path $WorkDir "install.log"
-    # -SkipReaperConfig avoids mutating a real reaper.ini; MIDIGPT_REAPER_DIR
-    # (see install.ps1) points the REAPER integration step at a throwaway
-    # directory instead of the real REAPER install, so this test never
-    # touches the machine's actual REAPER config either.
+    # MIDIGPT_REAPER_DIR (see install.ps1) points the REAPER integration
+    # steps at a throwaway directory instead of the real REAPER install, so
+    # this test never touches the machine's actual REAPER config. It gets a
+    # reaper.ini shaped like the one REAPER writes on Windows ([reaper],
+    # CRLF) so Step 5 runs for real -- including its Python DLL lookup with
+    # the venv active, which is what a normal install does and what
+    # test_reaper_states.ps1's -ReaperOnly runs can't cover.
     $FakeReaperDir = Join-Path $WorkDir "fake-reaper"
     New-Item -ItemType Directory -Path $FakeReaperDir -Force | Out-Null
+    $FakeIni = Join-Path $FakeReaperDir "reaper.ini"
+    [System.IO.File]::WriteAllText($FakeIni, "[reaper]`r`nsomeoption=1`r`n[audioconfig]`r`nsrate=48000`r`n", (New-Object System.Text.UTF8Encoding($false)))
     $env:MIDIGPT_REAPER_DIR = $FakeReaperDir
+    # The fake REAPER dir isn't the running REAPER's, so a real REAPER open
+    # on this machine (a developer's, say) mustn't make the installer skip
+    # ReaPack/reaper.ini here.
+    $env:MIDIGPT_FAKE_REAPER_RUNNING = "false"
 
     $InstallPs1 = Join-Path $CloneDir "install.ps1"
-    & powershell.exe -ExecutionPolicy Bypass -File $InstallPs1 -SkipReaperConfig *> $InstallLog
+    & powershell.exe -ExecutionPolicy Bypass -File $InstallPs1 *> $InstallLog
     $InstallExit = $LASTEXITCODE
     Get-Content $InstallLog | Write-Host
 
@@ -136,11 +152,66 @@ try {
     & $VenvPython -c "from midigpt.inference.engine import InferenceEngine" 2>$null
     if ($LASTEXITCODE -eq 0) { Test-Pass "import midigpt.inference" } else { Test-Fail "import midigpt.inference" }
 
-    # 4. REAPER Scripts junction, in the fake MIDIGPT_REAPER_DIR set above
+    # 4. torch actually loads (not just "is installed") -- the failure mode
+    # a machine without the MSVC runtime hits.
+    $script:Tests++
+    & $VenvPython -c "import torch" 2>$null
+    if ($LASTEXITCODE -eq 0) { Test-Pass "import torch" } else { Test-Fail "import torch" }
+
+    # 5. REAPER Scripts junction, in the fake MIDIGPT_REAPER_DIR set above
     # (not a real REAPER install).
     Assert-DirExists "REAPER Scripts junction exists" (Join-Path $FakeReaperDir "Scripts\MIDI-GPT")
 
-    # 5. Run unit tests
+    # 6. ReaImGui: the extension DLL plus the Python API the dashboard imports.
+    Assert-FileExists "ReaImGui DLL installed" (Join-Path $FakeReaperDir "UserPlugins\reaper_imgui-x64.dll")
+    Assert-FileExists "ReaImGui Python API installed (imgui.py)" (Join-Path $FakeReaperDir "Scripts\ReaTeam Extensions\API\imgui.py")
+
+    # 7. reaper.ini: keys in the existing [reaper] section (the only one
+    # REAPER reads), pointing at the base Python's DLL -- not the venv's
+    # directory, which has none.
+    $IniRaw = [System.IO.File]::ReadAllText($FakeIni)
+    $script:Tests++
+    if (([regex]::Matches($IniRaw, '(?im)^\[reaper\]')).Count -eq 1) { Test-Pass "reaper.ini has exactly one [reaper] section" } else { Test-Fail "reaper.ini has a duplicate [reaper]/[REAPER] section" }
+    $SectionBody = [regex]::Match($IniRaw, '(?is)^\[reaper\]\r?\n(.*?)(?=^\[|\z)', 'Multiline').Groups[1].Value
+    $script:Tests++
+    if ($SectionBody -match '(?m)^reascript=1\r?$') { Test-Pass "reascript=1 inside [reaper]" } else { Test-Fail "reascript=1 inside [reaper]" }
+    # REAPER's format: pythonlibpath64 = directory, pythonlibdll64 = bare
+    # file name (a full path there -> "No compatible version of Python was
+    # found").
+    $LibDir = [regex]::Match($SectionBody, '(?m)^pythonlibpath64=([^\r\n]*)').Groups[1].Value
+    $LibFile = [regex]::Match($SectionBody, '(?m)^pythonlibdll64=([^\r\n]*)').Groups[1].Value
+    $script:Tests++
+    if ($LibFile -match '^python3\d+\.dll$') { Test-Pass "pythonlibdll64 is a bare file name ($LibFile)" } else { Test-Fail "pythonlibdll64 should be a bare python3XX.dll file name (got '$LibFile')" }
+    $script:Tests++
+    if ($LibDir -and $LibFile -and (Test-Path (Join-Path $LibDir $LibFile) -PathType Leaf) -and ($LibDir -notmatch '\\\.venv(\\|$)')) {
+        Test-Pass "pythonlibpath64 inside [reaper] is the base Python's directory ($LibDir)"
+    } else {
+        Test-Fail "pythonlibpath64\pythonlibdll64 should be an existing base-Python DLL outside the venv (got '$LibDir' / '$LibFile')"
+    }
+    $script:Tests++
+    if ($IniRaw -notmatch "[^`r]`n") { Test-Pass "reaper.ini kept its CRLF line endings" } else { Test-Fail "reaper.ini has bare LF line endings" }
+
+    # 8. No unexpected warnings. install.ps1 deliberately exits 0 when a
+    # step fails but has a manual fallback -- a [WARN] line is the only
+    # trace of that, so every warning a clean install can legitimately
+    # print is listed here and anything else fails the test.
+    $AllowedWarnings = @(
+        # codeberg publishes no checksums for ReaImGui (see install.ps1).
+        "No published checksum for ReaImGui"
+    )
+    $Unexpected = @(Get-Content $InstallLog | Where-Object { $_ -match '^\[WARN\]' } | Where-Object {
+        $Line = $_
+        -not ($AllowedWarnings | Where-Object { $Line.Contains($_) })
+    })
+    $script:Tests++
+    if ($Unexpected.Count -eq 0) {
+        Test-Pass "no unexpected [WARN] lines in the install log"
+    } else {
+        Test-Fail "unexpected [WARN] lines in the install log:"
+        $Unexpected | ForEach-Object { Write-Host "        $_" }
+    }
+
+    # 9. Run unit tests
     Write-Host ""
     Info "Installing pytest and running unit tests..."
     $script:Tests++
@@ -172,6 +243,7 @@ try {
     exit $script:Failures
 } finally {
     Remove-Item Env:\MIDIGPT_REAPER_DIR -ErrorAction SilentlyContinue
+    Remove-Item Env:\MIDIGPT_FAKE_REAPER_RUNNING -ErrorAction SilentlyContinue
     if (-not $Keep) {
         Remove-Item -Path $WorkDir -Recurse -Force -ErrorAction SilentlyContinue
     } else {

@@ -8,10 +8,17 @@ name: Test install.sh / install.ps1
 #     disposable fake REAPER directories covering fresh/partial/
 #     pre-configured/REAPER-running/re-run starting states
 #   - the full end-to-end install (tests/integration/test_install.sh /
-#     .ps1): venv creation, PyTorch, the midigpt[http,inference] backend
-#     (from PyPI -- no sibling MIDI-GPT checkout needed here), the REAPER
-#     Scripts junction/symlink, and the unit test suite, all against a
-#     disposable copy of the repo.
+#     .ps1): venv creation, PyTorch (importable, not just installed), the
+#     midigpt[http,inference] backend (from PyPI -- no sibling MIDI-GPT
+#     checkout needed here), the REAPER Scripts junction/symlink, ReaImGui,
+#     reaper.ini configuration with the venv active, no unexpected [WARN]
+#     lines, and the unit test suite, all against a disposable copy of the
+#     repo.
+#   - install.ps1's helper functions (tests/integration/
+#     test_install_helpers.ps1), for the Windows failure modes these runners
+#     can't reproduce: they ship with the MSVC runtime PyTorch needs, so a
+#     machine without it can only be tested on a clean Windows VM (see the
+#     release checklist in README.md).
 # See those scripts' headers for exactly what each does and doesn't prove.
 #
 # install.ps1's rewrite (ReaPack/ReaImGui/Arachno/checksum parity with
@@ -71,6 +78,14 @@ jobs:
       - name: Run REAPER integration state matrix
         shell: pwsh
         run: .\tests\integration\test_reaper_states.ps1
+
+      # The failure modes this runner can't reproduce for real (it ships the
+      # MSVC runtime, so `import torch` never fails here), tested at the
+      # function level. Under powershell.exe (5.1) -- what
+      # "Install - Windows.bat" actually launches.
+      - name: Run install.ps1 helper unit tests
+        shell: pwsh
+        run: powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\integration\test_install_helpers.ps1
 
   full-install-unix:
     name: Full install (${{ matrix.os }})

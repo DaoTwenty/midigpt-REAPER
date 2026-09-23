@@ -2,7 +2,8 @@
 # MIDI-GPT for REAPER — Windows Installer (PowerShell)
 #
 # Installs everything needed to run MIDI-GPT in REAPER:
-#   1. System dependencies (python, git) via winget or choco
+#   1. System dependencies (python, git) via winget or choco, plus the
+#      Microsoft Visual C++ Runtime PyTorch needs (from Microsoft, with UAC)
 #   2. Python virtual environment + PyTorch
 #   3. MIDI-GPT backend library (pip, from PyPI or a sibling/source checkout)
 #   4. REAPER integration (Scripts junction), plus ReaPack and ReaImGui (the
@@ -107,6 +108,163 @@ function Test-BuildTools {
     return $true
 }
 
+# ── Microsoft Visual C++ Runtime ────────────────────────────────
+# PyTorch's Windows wheels link against the MSVC runtime (vcruntime140_1.dll,
+# msvcp140.dll) but don't ship it. Fresh Windows installs often don't have it
+# (GitHub's windows-latest runners always do, so CI never sees this), and
+# then `pip install torch` succeeds but `import torch` fails with
+# "[WinError 126] ... c10.dll or one of its dependencies".
+#
+# 14.40 minimum: binaries built with MSVC 17.10+ (as current PyTorch releases
+# are) can crash inside std::mutex on older runtimes, so an outdated runtime
+# is treated the same as a missing one.
+$VcRuntimeMinVersion = [version]"14.40"
+
+# The runtime must match the Python that loads torch, not the OS: x64 Python
+# runs (emulated) on ARM64 Windows too, and needs the x64 runtime there.
+function Get-VcRuntimeArch {
+    param([string]$Py)
+    $Machine = & $Py -c "import platform; print(platform.machine())" 2>$null
+    if ($Machine -eq "ARM64") { return "arm64" }
+    return "x64"
+}
+
+function Get-VcRuntimeVersion {
+    param([string]$Arch)
+    foreach ($Key in @(
+        "HKLM:\SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\$Arch",
+        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\$Arch"
+    )) {
+        $Rt = Get-ItemProperty -Path $Key -ErrorAction SilentlyContinue
+        if ($Rt -and $Rt.Installed -eq 1) {
+            return [version]"$($Rt.Major).$($Rt.Minor).$($Rt.Bld)"
+        }
+    }
+    return $null
+}
+
+function Test-VcRuntime {
+    param([string]$Arch)
+    $Ver = Get-VcRuntimeVersion -Arch $Arch
+    return ($null -ne $Ver) -and ($Ver -ge $VcRuntimeMinVersion)
+}
+
+function Write-VcRuntimeHelp {
+    param([string]$Arch = "x64")
+    Write-Host ""
+    Write-Host "  PyTorch needs the Microsoft Visual C++ Redistributable ($VcRuntimeMinVersion or newer)."
+    Write-Host "  Download and run Microsoft's installer, then re-run this installer:"
+    Write-Host "    https://aka.ms/vc14/vc_redist.$Arch.exe"
+    Write-Host ""
+}
+
+# Downloads Microsoft's redistributable, checks its signature, and runs it
+# elevated (it installs machine-wide, so UAC is unavoidable). Returns $true
+# on success; warns and returns $false on any failure, including the user
+# declining the UAC prompt.
+function Install-VcRuntime {
+    param([string]$Arch)
+    $Url = "https://aka.ms/vc14/vc_redist.$Arch.exe"
+    $Exe = Join-Path $env:TEMP "vc_redist.$Arch.exe"
+
+    # Windows PowerShell 5.1's progress bar slows Invoke-WebRequest to a crawl
+    # on a file this size (~25MB).
+    $ProgressPreference = "SilentlyContinue"
+    try {
+        Invoke-WebRequest -Uri $Url -OutFile $Exe -UseBasicParsing -TimeoutSec 300
+    } catch {
+        Write-Warn "Failed to download the Visual C++ Runtime installer"
+        return $false
+    }
+
+    # Unlike ReaPack, this one is Authenticode-signed -- only run it if
+    # Windows validates the signature as Microsoft's.
+    $Sig = Get-AuthenticodeSignature -FilePath $Exe
+    if ($Sig.Status -ne "Valid" -or $Sig.SignerCertificate.Subject -notmatch "O=Microsoft Corporation") {
+        Remove-Item $Exe -Force -ErrorAction SilentlyContinue
+        Write-Warn "Downloaded Visual C++ Runtime installer isn't validly signed by Microsoft -- discarded"
+        return $false
+    }
+
+    Write-Info "Installing (Windows will ask for administrator permission)..."
+    try {
+        $Proc = Start-Process -FilePath $Exe -ArgumentList "/install", "/quiet", "/norestart" -Verb RunAs -Wait -PassThru -ErrorAction Stop
+    } catch {
+        # Start-Process throws when the UAC prompt is declined.
+        Remove-Item $Exe -Force -ErrorAction SilentlyContinue
+        Write-Warn "Administrator permission wasn't granted -- Visual C++ Runtime not installed"
+        return $false
+    }
+    Remove-Item $Exe -Force -ErrorAction SilentlyContinue
+
+    switch ($Proc.ExitCode) {
+        0    { return $true }
+        1638 { return $true }  # a newer version is already installed
+        3010 {
+            Write-Warn "Visual C++ Runtime installed; Windows recommends a restart (usually not needed to continue)"
+            return $true
+        }
+        default {
+            Write-Warn "Visual C++ Runtime installer failed (exit code $($Proc.ExitCode))"
+            return $false
+        }
+    }
+}
+
+# Tells "torch isn't installed" apart from "torch is installed but won't
+# load" -- they need completely different fixes, and a bare
+# `python -c "import torch"` exit code can't distinguish them. Returns
+# @{ State = "ok"|"missing"|"broken"; Detail = version or error line }.
+function Get-TorchState {
+    python -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('torch') else 1)" 2>$null
+    if ($LASTEXITCODE -ne 0) { return @{ State = "missing"; Detail = "" } }
+
+    $Lines = @(python -c "import torch; print(torch.__version__)" 2>&1 | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+    if ($LASTEXITCODE -eq 0) { return @{ State = "ok"; Detail = $Lines[-1] } }
+
+    # The traceback's final "SomeError: message" line; torch may print its
+    # own hints after it, so don't just take the last line.
+    $ErrLine = $Lines | Where-Object { $_ -match "^\w+(Error|Exception)\b.*:" } | Select-Object -Last 1
+    if (-not $ErrLine) { $ErrLine = $Lines -join " " }
+    return @{ State = "broken"; Detail = $ErrLine }
+}
+
+# Whether a torch import error is a native DLL failing to load -- on Windows
+# almost always the missing/outdated MSVC runtime (see Get-VcRuntimeVersion).
+function Test-TorchDllLoadError {
+    param([string]$Detail)
+    return $Detail -match "WinError 126|WinError 1114|DLL load failed|c10\.dll"
+}
+
+# Sets Key=Value in reaper.ini's [reaper] section (Content in, Content out).
+function Set-ReaperIniKey {
+    param([string]$Key, [string]$Value, [string]$Content)
+    # REAPER writes reaper.ini with CRLF; keep whatever the file already
+    # uses so no line ends up with a bare LF.
+    $Nl = "`r`n"
+    if (($Content -match "`n") -and ($Content -notmatch "`r`n")) { $Nl = "`n" }
+
+    # [^\r\n]*, not .*: in .NET, .* also eats the \r of a CRLF line (and
+    # (?m)$ only matches before \n), so the replacement would drop it.
+    $KeyPattern = "(?m)^$([regex]::Escape($Key))=[^\r\n]*"
+    if ($Content -match $KeyPattern) {
+        return ($Content -replace $KeyPattern, "$Key=$Value")
+    }
+    # Explicit IgnoreCase: unlike -match, [regex]::Match is case-sensitive,
+    # and REAPER's own header is [reaper]. Missing it meant appending a
+    # second, duplicate section, which REAPER never reads (first matching
+    # section wins).
+    $SectionMatch = [regex]::Match($Content, "(?m)^\[reaper\][ \t]*(?=\r?$)", "IgnoreCase")
+    if ($SectionMatch.Success) {
+        $InsertAt = $SectionMatch.Index + $SectionMatch.Length
+        return $Content.Substring(0, $InsertAt) + "$Nl$Key=$Value" + $Content.Substring($InsertAt)
+    }
+    # No [reaper] section at all yet (fresh ini) -- append one.
+    $Sep = ""
+    if ($Content.TrimEnd().Length -gt 0) { $Sep = "$Nl$Nl" }
+    return $Content.TrimEnd() + "$Sep[reaper]$Nl$Key=$Value$Nl"
+}
+
 # Ask REAPER to quit gracefully (taskkill without /F sends a close request
 # to the main window, so REAPER's own "save changes?" prompt still fires --
 # never force-killed) and wait for the process to actually exit.
@@ -161,78 +319,111 @@ function Open-Url {
     }
 }
 
-# Downloads ReaImGui extension directly from codeberg.org (ReaTeam Extensions)
-# Same pattern as ReaPack: direct download + checksum verification.
+# Installs the complete ReaImGui package directly from codeberg.org,
+# replicating what ReaPack does from the ReaTeam Extensions repo (same as
+# install.sh's download_reaimgui): the native extension into UserPlugins,
+# plus the Python API (imgui.py -- MIDI-GPT.py imports it from
+# Scripts\ReaTeam Extensions\API) and the Lua shims.
+#
+# Checksums: used when codeberg's release API publishes one for a file
+# (a `sha256`, or a GitHub-style `digest`, field on the asset). At the time
+# of writing it publishes none -- and imgui.lua isn't a release asset at all
+# -- so these install unverified, with a warning saying so.
 # ReaImGui releases: https://codeberg.org/cfillion/reaimgui/releases
-function Download-ReaImGui {
-    param(
-        [string]$PlatformArch,
-        [string]$DestDir
+$ReaImGuiVersion = "0.10.0.5"
+$ReaImGuiDll = "reaper_imgui-x64.dll"
+
+function Get-ReaImGuiFiles {
+    param([string]$ReaperDir)
+    $Rel = "https://codeberg.org/cfillion/reaimgui/releases/download/v$ReaImGuiVersion"
+    $ApiDir = Join-Path $ReaperDir "Scripts\ReaTeam Extensions\API"
+    return @(
+        @{ Name = $ReaImGuiDll; Url = "$Rel/$ReaImGuiDll"; Dir = (Join-Path $ReaperDir "UserPlugins"); Required = $true },
+        @{ Name = "imgui.py"; Url = "$Rel/imgui.py"; Dir = $ApiDir; Required = $true },
+        @{ Name = "imgui.lua"; Url = "https://codeberg.org/cfillion/reaimgui/raw/v$ReaImGuiVersion/shims/imgui.lua"; Dir = $ApiDir; Required = $false },
+        @{ Name = "gfx2imgui.lua"; Url = "$Rel/gfx2imgui.lua"; Dir = $ApiDir; Required = $false }
     )
+}
 
-    $ImguiAsset = ""
-    switch ($PlatformArch) {
-        "windows:x64" { $ImguiAsset = "reaper_imgui-x64.dll" }
-        default { return $false }
-    }
-
-    if ([string]::IsNullOrEmpty($ImguiAsset)) {
-        return $false
-    }
-
-    Write-Info "Downloading ReaImGui ($ImguiAsset)..."
-    New-Item -ItemType Directory -Path $DestDir -Force | Out-Null
-    $TmpFile = Join-Path ([System.IO.Path]::GetTempPath()) "midigpt-imgui-$([System.Guid]::NewGuid()).dll"
-
-    # ReaImGui releases on codeberg.org
-    $ImguiUrl = "https://codeberg.org/cfillion/reaimgui/releases/download/v0.10.0.5/$ImguiAsset"
-
-    # Fetch expected SHA from codeberg release API (or GitHub mirror)
-    # codeberg API: https://codeberg.org/api/v1/repos/cfillion/reaimgui/releases
-    $ExpectedSha = ""
+# Returns a hashtable of asset name -> expected lowercase SHA256, for the
+# assets codeberg publishes one for (possibly none).
+function Get-ReaImGuiChecksums {
+    $Sums = @{}
     try {
-        $ReleaseJson = Invoke-WebRequest -Uri "https://codeberg.org/api/v1/repos/cfillion/reaimgui/releases" -UseBasicParsing -TimeoutSec 10
-        if ($ReleaseJson.StatusCode -eq 200) {
-            $ExpectedSha = ($ReleaseJson.Content | ConvertFrom-Json) |
-                Where-Object { $_.tag_name -eq "v0.10.0.5" } |
-                ForEach-Object {
-                    $_.assets |
-                        Where-Object { $_.name -eq $ImguiAsset } |
-                        ForEach-Object { $_.sha256 }
-                }
+        $Release = Invoke-RestMethod -Uri "https://codeberg.org/api/v1/repos/cfillion/reaimgui/releases/tags/v$ReaImGuiVersion" -TimeoutSec 15
+        foreach ($Asset in $Release.assets) {
+            $Sha = $null
+            if ($Asset.PSObject.Properties["sha256"] -and $Asset.sha256) { $Sha = $Asset.sha256 }
+            elseif ($Asset.PSObject.Properties["digest"] -and $Asset.digest) { $Sha = $Asset.digest -replace "^sha256:", "" }
+            if ($Sha) { $Sums[$Asset.name] = $Sha.ToLower() }
         }
-    } catch {
-        Write-Warn "Could not fetch expected checksum for ReaImGui -- installing unverified"
+    } catch {}
+    return $Sums
+}
+
+# The dashboard needs both the extension DLL and imgui.py; a DLL alone (e.g.
+# from an older version of this installer) still leaves `import imgui` failing.
+function Test-ReaImGuiInstalled {
+    param([string]$ReaperDir)
+    foreach ($F in (Get-ReaImGuiFiles -ReaperDir $ReaperDir)) {
+        if ($F.Required -and -not (Test-Path (Join-Path $F.Dir $F.Name))) { return $false }
     }
+    return $true
+}
 
-    try {
-        Invoke-WebRequest -Uri $ImguiUrl -OutFile $TmpFile -UseBasicParsing -TimeoutSec 30
-        $Verified = $true
-        if (-not [string]::IsNullOrEmpty($ExpectedSha)) {
-            $ActualSha = Get-FileHash -Path $TmpFile -Algorithm SHA256 | Select-Object -ExpandProperty Hash
-            if ($ActualSha -ne $ExpectedSha) {
-                $Verified = $false
-                Write-Warn "ReaImGui checksum mismatch (expected: $ExpectedSha, got: $ActualSha)"
-            }
-        } else {
-            Write-Warn "Could not fetch expected checksum for ReaImGui -- installing unverified"
-        }
+function Install-ReaImGui {
+    param([string]$ReaperDir)
 
-        if ($Verified) {
-            $DestFile = Join-Path $DestDir $ImguiAsset
-            Move-Item -Path $TmpFile -Destination $DestFile -Force
-            Write-OK "ReaImGui installed and checksum-verified ($ImguiAsset)"
-            return $true
-        } else {
+    Write-Info "Installing ReaImGui v$ReaImGuiVersion ($ReaImGuiDll + Python API)..."
+    $ProgressPreference = "SilentlyContinue"
+
+    $Checksums = Get-ReaImGuiChecksums
+    $Unverified = @()
+
+    foreach ($F in (Get-ReaImGuiFiles -ReaperDir $ReaperDir)) {
+        $TmpFile = Join-Path ([System.IO.Path]::GetTempPath()) "midigpt-imgui-$([System.Guid]::NewGuid())"
+        try {
+            Invoke-WebRequest -Uri $F.Url -OutFile $TmpFile -UseBasicParsing -TimeoutSec 60
+        } catch {
             Remove-Item $TmpFile -Force -ErrorAction SilentlyContinue
-            Write-Warn "Downloaded ReaImGui didn't match expected checksum -- discarded"
-            return $false
+            Write-Warn "Failed to download $($F.Name) from $($F.Url)"
+            if ($F.Required) { return $false } else { continue }
         }
-    } catch {
-        Write-Warn "Failed to download ReaImGui from $ImguiUrl"
-        Remove-Item $TmpFile -Force -ErrorAction SilentlyContinue
-        return $false
+
+        $ExpectedSha = $Checksums[$F.Name]
+        if ($ExpectedSha) {
+            $ActualSha = (Get-FileHash -Path $TmpFile -Algorithm SHA256).Hash.ToLower()
+            if ($ActualSha -ne $ExpectedSha) {
+                Remove-Item $TmpFile -Force -ErrorAction SilentlyContinue
+                Write-Warn "$($F.Name) didn't match its published checksum -- discarded (expected $ExpectedSha, got $ActualSha)"
+                if ($F.Required) { return $false } else { continue }
+            }
+        }
+
+        New-Item -ItemType Directory -Path $F.Dir -Force | Out-Null
+        try {
+            Move-Item -Path $TmpFile -Destination (Join-Path $F.Dir $F.Name) -Force -ErrorAction Stop
+        } catch {
+            # Windows locks a loaded DLL, e.g. REAPER still open with an
+            # older ReaImGui.
+            Remove-Item $TmpFile -Force -ErrorAction SilentlyContinue
+            Write-Warn "Couldn't write $($F.Name) to $($F.Dir) -- is REAPER still running?"
+            if ($F.Required) { return $false } else { continue }
+        }
+        # Same Mark-of-the-Web clearing as ReaPack, so REAPER can load the
+        # DLL without a manual SmartScreen click-through.
+        Unblock-File -Path (Join-Path $F.Dir $F.Name) -ErrorAction SilentlyContinue
+        if ($ExpectedSha) {
+            Write-OK "$($F.Name) installed and checksum-verified"
+        } else {
+            Write-OK "$($F.Name) installed"
+            $Unverified += $F.Name
+        }
     }
+    if ($Unverified.Count -gt 0) {
+        Write-Warn "No published checksum for ReaImGui $($Unverified -join ', ') -- installed unverified"
+    }
+    return $true
 }
 
 # Downloads the Arachno GM SoundFont into this repo's own soundfonts\
@@ -297,7 +488,7 @@ if ($Help) {
     Write-Host "Usage: .\install.ps1 [OPTIONS]"
     Write-Host ""
     Write-Host "Options:"
-    Write-Host "  -SkipDeps            Skip system dependency check"
+    Write-Host "  -SkipDeps            Skip system dependency check (incl. the Visual C++ Runtime)"
     Write-Host "  -SkipReaperConfig    Skip automatic REAPER Python/ReaScript configuration"
     Write-Host "  -ReaperOnly          Only do REAPER integration (Step 4/5: junction, ReaPack,"
     Write-Host "                       ReaImGui, reaper.ini) -- skips venv/backend entirely."
@@ -435,6 +626,34 @@ if (-not $SkipDeps) {
     }
 
     if (-not $PythonCmd) { Write-Fail "Python >= $PythonMinVersion required but not found" }
+
+    # -- Microsoft Visual C++ Runtime (see Get-VcRuntimeVersion) --
+    $VcArch = Get-VcRuntimeArch -Py $PythonCmd
+    $VcVer = Get-VcRuntimeVersion -Arch $VcArch
+    if (Test-VcRuntime -Arch $VcArch) {
+        Write-OK "Microsoft Visual C++ Runtime $VcVer"
+    } else {
+        if ($VcVer) {
+            Write-Warn "Microsoft Visual C++ Runtime $VcVer is too old (PyTorch needs $VcRuntimeMinVersion or newer)"
+        } else {
+            Write-Warn "Microsoft Visual C++ Runtime not found (PyTorch needs it)"
+        }
+
+        if (Test-Interactive) {
+            $InstallVc = Read-Host "  Download and install it from Microsoft now? [Y/n]"
+            if ($InstallVc -notmatch "^[Nn]") {
+                if ((Install-VcRuntime -Arch $VcArch) -and (Test-VcRuntime -Arch $VcArch)) {
+                    Write-OK "Microsoft Visual C++ Runtime $(Get-VcRuntimeVersion -Arch $VcArch) installed"
+                }
+            }
+        }
+
+        if (-not (Test-VcRuntime -Arch $VcArch)) {
+            Write-VcRuntimeHelp -Arch $VcArch
+            Write-Fail "Microsoft Visual C++ Runtime required but not installed"
+        }
+    }
+
     Write-OK "All system dependencies satisfied"
 
 } else {
@@ -474,37 +693,54 @@ if (Test-Path $VenvDir) {
 }
 
 Write-Info "Checking PyTorch..."
-python -c "import torch" 2>$null
-if ($LASTEXITCODE -eq 0) {
-    $TorchVer = python -c "import torch; print(torch.__version__)" 2>$null
-    Write-OK "PyTorch $TorchVer already installed"
-} else {
+$Torch = Get-TorchState
+$TorchWasInstalled = $Torch.State -ne "missing"
+if ($Torch.State -eq "missing") {
     Write-Info "Installing PyTorch (this may take a few minutes)..."
     if ($TorchGpu) {
         pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
     } else {
         pip install torch
     }
-    python -c "import torch" 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        $TorchVer = python -c "import torch; print(torch.__version__)" 2>$null
-        Write-OK "PyTorch $TorchVer installed"
-    } else {
-        Write-Host ""
-        Write-Warn "PyTorch could not be installed automatically."
-        Write-Host ""
-        Write-Host "  This usually means there is no pre-built PyTorch wheel for your"
-        Write-Host "  Python version. Please install PyTorch manually:"
-        Write-Host ""
-        Write-Host "  1. Visit: https://pytorch.org/get-started/locally/"
-        Write-Host "  2. Select your OS, package manager (pip), and Python version"
-        Write-Host "  3. Run the install command it gives you WITH THIS VENV ACTIVATED:"
-        Write-Host "       .\\.venv\\Scripts\\Activate.ps1"
-        Write-Host "       pip install <command-from-pytorch-org>"
-        Write-Host "  4. Then re-run this installer (it will detect existing torch)"
-        Write-Host ""
-        Write-Fail "PyTorch installation failed. See instructions above."
+    $Torch = Get-TorchState
+}
+
+if ($Torch.State -eq "ok") {
+    if ($TorchWasInstalled) { Write-OK "PyTorch $($Torch.Detail) already installed" }
+    else { Write-OK "PyTorch $($Torch.Detail) installed" }
+} elseif ($Torch.State -eq "broken") {
+    # Installed fine, but fails on import -- reinstalling torch won't help,
+    # so don't send the user down the "no wheel for your Python" path.
+    Write-Host ""
+    Write-Warn "PyTorch is installed but fails to load:"
+    Write-Host "    $($Torch.Detail)"
+    if (Test-TorchDllLoadError -Detail $Torch.Detail) {
+        # Almost always the MSVC runtime -- e.g. when Step 1 was skipped
+        # with -SkipDeps, or the runtime was removed after a previous install.
+        Write-VcRuntimeHelp -Arch (Get-VcRuntimeArch -Py "python")
+        Write-Fail "PyTorch can't load its DLLs -- install the Visual C++ Runtime and re-run"
     }
+    Write-Host ""
+    Write-Host "  Try reinstalling it with this venv activated, then re-run this installer:"
+    Write-Host "    .\.venv\Scripts\Activate.ps1"
+    Write-Host "    pip install --force-reinstall torch"
+    Write-Host ""
+    Write-Fail "PyTorch installation is broken. See instructions above."
+} else {
+    Write-Host ""
+    Write-Warn "PyTorch could not be installed automatically."
+    Write-Host ""
+    Write-Host "  This usually means there is no pre-built PyTorch wheel for your"
+    Write-Host "  Python version. Please install PyTorch manually:"
+    Write-Host ""
+    Write-Host "  1. Visit: https://pytorch.org/get-started/locally/"
+    Write-Host "  2. Select your OS, package manager (pip), and Python version"
+    Write-Host "  3. Run the install command it gives you WITH THIS VENV ACTIVATED:"
+    Write-Host "       .\.venv\Scripts\Activate.ps1"
+    Write-Host "       pip install <command-from-pytorch-org>"
+    Write-Host "  4. Then re-run this installer (it will detect existing torch)"
+    Write-Host ""
+    Write-Fail "PyTorch installation failed. See instructions above."
 }
 
 # ====================================================================
@@ -670,12 +906,10 @@ if (Test-Path $ReaperDir) {
         }
     }
 
-    $HasImgui = $null
-    if (Test-Path $UserPluginsDir) {
-        $HasImgui = Get-ChildItem -Path $UserPluginsDir -Filter "*imgui*" -ErrorAction SilentlyContinue
-    }
-    if (-not $HasImgui) {
-        if (Download-ReaImGui -PlatformArch $PlatformArch -DestDir $UserPluginsDir) {
+    if (Test-ReaImGuiInstalled -ReaperDir $ReaperDir) {
+        Write-OK "ReaImGui already installed"
+    } else {
+        if (Install-ReaImGui -ReaperDir $ReaperDir) {
             $ReapackReady = $true
         } elseif ($ReapackReady) {
             Write-Warn "ReaImGui not installed - manual installation required:"
@@ -706,9 +940,13 @@ if ($SkipReaperConfig) {
     $PyCmdForDll = "python3"
     if ($PythonCmd) { $PyCmdForDll = $PythonCmd }
 
+    # base_exec_prefix, not exec_prefix: Step 2 activated the venv, so
+    # $PyCmdForDll ("python") is now the venv's interpreter, whose
+    # exec_prefix is .venv -- which has no pythonXY.dll. REAPER needs the
+    # base install's DLL (same thing outside a venv, e.g. -ReaperOnly).
     $PythonDll = & $PyCmdForDll -c @"
 import sys, pathlib
-base = pathlib.Path(sys.exec_prefix)
+base = pathlib.Path(sys.base_exec_prefix)
 ver = f'{sys.version_info.major}{sys.version_info.minor}'
 for p in base.glob(f'python{ver}.dll'):
     print(p); break
@@ -725,36 +963,29 @@ for p in base.glob(f'python{ver}.dll'):
             Copy-Item $ReaperIni "$ReaperIni.midigpt-backup" -Force
             Write-Info "Backed up reaper.ini -> reaper.ini.midigpt-backup"
 
-            $IniContent = Get-Content $ReaperIni -Raw
-            if ($null -eq $IniContent) { $IniContent = "" }
+            # REAPER stores reaper.ini as UTF-8 (no BOM); Get-Content/
+            # Set-Content in Windows PowerShell 5.1 default to the ANSI
+            # codepage. That round trip happens to be lossless on
+            # Windows-1252 systems, but on a multi-byte ANSI codepage (e.g.
+            # Japanese) it would mangle non-ASCII paths in the file.
+            $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+            $IniContent = [System.IO.File]::ReadAllText($ReaperIni, $Utf8NoBom)
 
-            function Set-ReaperIniKey {
-                param([string]$Key, [string]$Value, [string]$Content)
-                # PowerShell's -match/-replace are case-insensitive by
-                # default, so this already matches [REAPER] and [reaper]
-                # alike without any special-casing.
-                $KeyPattern = "(?m)^$([regex]::Escape($Key))=.*$"
-                if ($Content -match $KeyPattern) {
-                    return ($Content -replace $KeyPattern, "$Key=$Value")
-                }
-                $SectionMatch = [regex]::Match($Content, "(?m)^\[REAPER\]\s*$")
-                if ($SectionMatch.Success) {
-                    $InsertAt = $SectionMatch.Index + $SectionMatch.Length
-                    return $Content.Substring(0, $InsertAt) + "`n$Key=$Value" + $Content.Substring($InsertAt)
-                }
-                # No [REAPER]/[reaper] section at all yet (fresh ini) --
-                # append one.
-                $Sep = ""
-                if ($Content.TrimEnd().Length -gt 0) { $Sep = "`n`n" }
-                return $Content.TrimEnd() + "$Sep[REAPER]`n$Key=$Value`n"
-            }
-
+            # Same two keys as install.sh writes on macOS/Linux, matching
+            # REAPER's two ReaScript preference fields: pythonlibpath64 is
+            # the *directory* ("Custom path to Python dll directory") and
+            # pythonlibdll64 just the *file name* ("Force ReaScript to use
+            # specific Python .dll"). A full path in pythonlibdll64 alone
+            # leaves REAPER with "No compatible version of Python was found".
+            $PyLibDir = Split-Path $PythonDll -Parent
+            $PyLibFile = Split-Path $PythonDll -Leaf
             $IniContent = Set-ReaperIniKey -Key "reascript" -Value "1" -Content $IniContent
-            $IniContent = Set-ReaperIniKey -Key "pythonlibdll64" -Value $PythonDll -Content $IniContent
+            $IniContent = Set-ReaperIniKey -Key "pythonlibpath64" -Value $PyLibDir -Content $IniContent
+            $IniContent = Set-ReaperIniKey -Key "pythonlibdll64" -Value $PyLibFile -Content $IniContent
 
-            Set-Content -Path $ReaperIni -Value $IniContent -NoNewline
+            [System.IO.File]::WriteAllText($ReaperIni, $IniContent, $Utf8NoBom)
 
-            if (($IniContent -match "(?m)^reascript=1") -and ($IniContent -match "(?m)^pythonlibdll64=")) {
+            if (($IniContent -match "(?m)^reascript=1") -and ($IniContent -match "(?m)^pythonlibpath64=") -and ($IniContent -match "(?m)^pythonlibdll64=")) {
                 Write-OK "ReaScript enabled (reascript=1)"
                 Write-OK "Python library: $PythonDll"
             } else {
@@ -783,8 +1014,10 @@ for p in base.glob(f'python{ver}.dll'):
             Write-Host "  1. Open REAPER"
             Write-Host "  2. Options > Preferences > Plug-Ins > ReaScript"
             Write-Host "  3. Enable 'ReaScript' (checkbox)"
-            Write-Host "  4. Set 'Python library' to:"
-            Write-Host "       $PythonDll" -ForegroundColor Green
+            Write-Host "  4. Set 'Custom path to Python dll directory' to:"
+            Write-Host "       $(Split-Path $PythonDll -Parent)" -ForegroundColor Green
+            Write-Host "     and 'Force ReaScript to use specific Python .dll' to:"
+            Write-Host "       $(Split-Path $PythonDll -Leaf)" -ForegroundColor Green
             Write-Host "  5. Click OK, then RESTART REAPER for changes to take effect."
         }
     }

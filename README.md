@@ -67,7 +67,8 @@
 - **Python** 3.10 – 3.12 (3.12 recommended) — [Download Python](https://www.python.org/downloads/)
 - **git** — used as a fallback source clone if installing the MIDI-GPT backend from PyPI fails
 - **curl** — used to download ReaImGui, ReaPack, and the Arachno soundfont
-- **OS:** macOS, Linux, or Windows
+- **Microsoft Visual C++ Redistributable** (Windows only, 14.40 or newer) — required by PyTorch. The installer checks for it and offers to install it from Microsoft for you (Windows will ask for administrator permission once). To install it yourself: [vc_redist.x64.exe](https://aka.ms/vc14/vc_redist.x64.exe)
+- **OS:** macOS, Linux, or Windows 10/11 (64-bit)
 
 ### One-Line Install
 
@@ -224,6 +225,8 @@ pip install pytest
 python3 -m pytest tests/
 ```
 
+On Windows, the PowerShell counterparts are `.\tests\integration\test_install.ps1`, `.\tests\integration\test_reaper_states.ps1`, and `.\tests\integration\test_install_helpers.ps1` (fast, no network).
+
 ### Building a Release
 
 Releases are automated: push a version tag and CI builds the release zip on a clean runner and opens a draft GitHub Release with it attached.
@@ -234,6 +237,13 @@ git push origin vX.Y.Z
 ```
 
 Review the draft (its notes are auto-generated, so worth a pass) and publish it from the GitHub UI, or `gh release edit vX.Y.Z --draft=false`. To build the zip locally without publishing anything: `./dev/build_release.sh`.
+
+**Before a release that touches `install.ps1`: test on a clean Windows VM.** CI can't cover this. GitHub's Windows runners come with Visual Studio (so the Visual C++ Runtime PyTorch needs is always present), Python and git preinstalled, so they never see what a fresh Windows machine does. On a clean Windows 10 or 11 VM (or Windows Sandbox) with only REAPER installed and launched once:
+
+1. Install Python 3.12 and git, then run `.\install.ps1` from a new PowerShell window.
+2. At the Visual C++ Runtime prompt, answer **n** once: the installer should stop with the download link. Then re-run, answer **Y** and accept the administrator prompt: it should install and continue.
+3. Check the log has no `[WARN]` lines other than "No published checksum for ReaImGui".
+4. In REAPER: *Options > Preferences > Plug-Ins > ReaScript* shows Python as detected, and loading `MIDI-GPT.py` opens the dashboard.
 
 ### Project Layout
 

@@ -19,9 +19,16 @@
 # idempotent. It does NOT and CANNOT prove REAPER itself loads any of this
 # correctly -- that needs a real REAPER session.
 #
-# This does hit the real network for ReaPack's GitHub release (needed to
-# test the actual download+checksum path for real) -- everything else here
-# is local file state.
+# Assertions check the resulting files, not just log wording: the installer
+# deliberately exits 0 with a [WARN] when something it tried failed, so
+# "the log mentions X" passes whether X succeeded or not.
+#
+# The -ReaperOnly path never activates the venv, so Step 5's Python DLL
+# lookup under an active venv is covered by test_install.ps1 instead.
+#
+# This hits the real network for ReaPack's GitHub release and ReaImGui's
+# codeberg release (to test the actual download paths for real) --
+# everything else here is local file state.
 #
 # Usage:
 #   pwsh ./tests/integration/test_reaper_states.ps1
@@ -51,10 +58,27 @@ function Assert-False {
     if (-not (& $Condition)) { Test-Pass $Desc } else { Test-Fail $Desc }
 }
 
+# Plain substring match -- not -like, which treats [ ] in the needle as a
+# wildcard character class (so "[audioconfig]" would never match itself).
+function Test-FileContains {
+    param([string]$FilePath, [string]$Needle)
+    return [System.IO.File]::ReadAllText($FilePath).Contains($Needle)
+}
+
 function Assert-Contains {
     param([string]$Desc, [string]$FilePath, [string]$Needle)
     $script:Tests++
-    if ((Test-Path $FilePath) -and ((Get-Content $FilePath -Raw) -like "*$Needle*")) {
+    if ((Test-Path $FilePath) -and (Test-FileContains $FilePath $Needle)) {
+        Test-Pass $Desc
+    } else {
+        Test-Fail $Desc
+    }
+}
+
+function Assert-NotContains {
+    param([string]$Desc, [string]$FilePath, [string]$Needle)
+    $script:Tests++
+    if ((Test-Path $FilePath) -and -not (Test-FileContains $FilePath $Needle)) {
         Test-Pass $Desc
     } else {
         Test-Fail $Desc
@@ -71,23 +95,77 @@ function Assert-GrepCount {
     if ($Actual -eq $Expected) { Test-Pass "$Desc (found $Actual)" } else { Test-Fail "$Desc (expected $Expected, found $Actual)" }
 }
 
+# Key=value pairs of reaper.ini's first [reaper] section (header matched
+# case-insensitively, as REAPER does) -- i.e. what REAPER actually reads.
+# Keys written into any other section, or a duplicate [REAPER] section
+# further down, don't count.
+function Get-ReaperSection {
+    param([string]$IniPath)
+    $Keys = @{}
+    $InSection = $false
+    $SeenSection = $false
+    foreach ($Line in [System.IO.File]::ReadAllLines($IniPath)) {
+        if ($Line -match '^\[(.*)\]\s*$') {
+            if ($SeenSection) { break }
+            $InSection = ($Matches[1] -eq "reaper")
+            if ($InSection) { $SeenSection = $true }
+            continue
+        }
+        if ($InSection -and $Line -match '^([^=]+)=(.*)$') { $Keys[$Matches[1]] = $Matches[2] }
+    }
+    return $Keys
+}
+
+# The shape checks every reaper.ini the installer touched must pass.
+function Assert-IniWellFormed {
+    param([string]$Label, [string]$IniPath)
+    $Raw = [System.IO.File]::ReadAllText($IniPath)
+    $script:Tests++
+    $Headers = ([regex]::Matches($Raw, '(?im)^\[reaper\]')).Count
+    if ($Headers -eq 1) { Test-Pass "$Label -- no duplicate [REAPER] section" } else { Test-Fail "$Label -- $Headers [reaper]/[REAPER] headers" }
+    $Section = Get-ReaperSection $IniPath
+    Assert-True "$Label -- reascript=1 is inside the [reaper] section" { $Section["reascript"] -eq "1" }
+    # REAPER's format: pythonlibpath64 = directory, pythonlibdll64 = bare
+    # file name. A full path in pythonlibdll64 makes REAPER report "No
+    # compatible version of Python was found".
+    Assert-True "$Label -- pythonlibpath64 and pythonlibdll64 are inside the [reaper] section" {
+        $Section.ContainsKey("pythonlibpath64") -and $Section.ContainsKey("pythonlibdll64")
+    }
+    Assert-True "$Label -- pythonlibdll64 is a bare python3XX.dll file name, not a path" { "$($Section["pythonlibdll64"])" -match '^python3\d+\.dll$' }
+    Assert-True "$Label -- pythonlibpath64\pythonlibdll64 exists" {
+        $Section["pythonlibpath64"] -and (Test-Path (Join-Path $Section["pythonlibpath64"] "$($Section["pythonlibdll64"])") -PathType Leaf)
+    }
+    Assert-False "$Label -- pythonlibpath64 isn't inside a venv" { "$($Section["pythonlibpath64"])" -match '\\\.venv(\\|$)' }
+}
+
 $WorkDir = Join-Path ([System.IO.Path]::GetTempPath()) "midigpt-reaper-states-test-$([System.Guid]::NewGuid())"
 New-Item -ItemType Directory -Path $WorkDir -Force | Out-Null
+$Log = Join-Path $WorkDir "last_run.log"
 
 function Invoke-Install {
     param([string]$FakeReaperDir, [string]$FakeRunning)
     $env:MIDIGPT_REAPER_DIR = $FakeReaperDir
     $env:MIDIGPT_FAKE_REAPER_RUNNING = $FakeRunning
-    $LogPath = Join-Path $WorkDir "last_run.log"
-    & powershell.exe -ExecutionPolicy Bypass -File $InstallPs1 -ReaperOnly *> $LogPath
+    & powershell.exe -ExecutionPolicy Bypass -File $InstallPs1 -ReaperOnly *> $Log
     $ExitCode = $LASTEXITCODE
     if ($ExitCode -ne 0) {
         Write-Host "  [install.ps1 exited $ExitCode -- log follows]" -ForegroundColor Magenta
-        Get-Content $LogPath | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
+        Get-Content $Log | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
         Write-Host "  [end log]" -ForegroundColor Magenta
     }
     return $ExitCode
 }
+
+# Writes an ini with exact bytes (Set-Content would add its own line
+# endings and, in Windows PowerShell 5.1, re-encode to ANSI).
+function Write-Ini {
+    param([string]$Path, [string]$Content)
+    New-Item -ItemType Directory -Path (Split-Path $Path -Parent) -Force | Out-Null
+    [System.IO.File]::WriteAllText($Path, $Content, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+$ImguiDll = "UserPlugins\reaper_imgui-x64.dll"
+$ImguiPy = "Scripts\ReaTeam Extensions\API\imgui.py"
 
 Write-Host ""
 Write-Host "=== REAPER integration state matrix (install.ps1) ===" -ForegroundColor White
@@ -98,7 +176,7 @@ Test-Scenario "Fresh: REAPER dir doesn't exist at all"
 $Fake = Join-Path $WorkDir "s1_missing"
 $ExitCode = Invoke-Install $Fake "false"
 Assert-True "install.ps1 exits 0 when REAPER isn't installed yet" { $ExitCode -eq 0 }
-Assert-Contains "warns REAPER config dir not found" (Join-Path $WorkDir "last_run.log") "REAPER config directory not found"
+Assert-Contains "warns REAPER config dir not found" $Log "REAPER config directory not found"
 Assert-False "does not create the REAPER dir itself" { Test-Path $Fake }
 
 # ============================================================================
@@ -110,28 +188,37 @@ $ExitCode = Invoke-Install $Fake "false"
 Assert-True "install.ps1 exits 0" { $ExitCode -eq 0 }
 Assert-True "Scripts junction created" { Test-Path (Join-Path $Fake "Scripts\MIDI-GPT") }
 Assert-True "ReaPack binary downloaded" { (Get-ChildItem -Path (Join-Path $Fake "UserPlugins") -Filter "reaper_reapack*" -ErrorAction SilentlyContinue).Count -gt 0 }
-Assert-Contains "ReaPack reported checksum-verified" (Join-Path $WorkDir "last_run.log") "checksum-verified"
-# With direct ReaImGui download, no bootstrap is written
-Assert-Contains "ReaImGui installed" (Join-Path $WorkDir "last_run.log") "ReaImGui"
-Assert-Contains "reports reaper.ini not found (fresh REAPER, never launched)" (Join-Path $WorkDir "last_run.log") "reaper.ini not found"
+Assert-Contains "ReaPack checksum-verified against GitHub's digest" $Log "ReaPack installed and checksum-verified"
+Assert-True "ReaImGui DLL installed" { Test-Path (Join-Path $Fake $ImguiDll) -PathType Leaf }
+Assert-True "ReaImGui Python API installed (imgui.py -- the dashboard imports it)" { Test-Path (Join-Path $Fake $ImguiPy) -PathType Leaf }
+Assert-True "ReaImGui DLL is a real PE binary, not an error page" {
+    $P = Join-Path $Fake $ImguiDll
+    if (-not (Test-Path $P)) { return $false }
+    $B = [System.IO.File]::ReadAllBytes($P)
+    $B.Length -gt 100000 -and $B[0] -eq 0x4D -and $B[1] -eq 0x5A
+}
+Assert-NotContains "no 'ReaImGui not installed' warning" $Log "ReaImGui not installed"
+Assert-Contains "reports reaper.ini not found (fresh REAPER, never launched)" $Log "reaper.ini not found"
 
 # ============================================================================
 Test-Scenario "Re-run on the same state (idempotency)"
 # ============================================================================
 Invoke-Install $Fake "false" | Out-Null
-Assert-Contains "second run detects ReaPack already installed (no re-download)" (Join-Path $WorkDir "last_run.log") "ReaPack already installed"
-# Direct download should detect ImGui already present, no bootstrap needed.
-Assert-True "no duplicate ImGui install on re-run" { -not ((Get-Content (Join-Path $WorkDir "last_run.log")) -like "*Downloading ReaImGui*") }
+Assert-Contains "second run detects ReaPack already installed (no re-download)" $Log "ReaPack already installed"
+Assert-Contains "second run detects ReaImGui already installed" $Log "ReaImGui already installed"
+Assert-NotContains "no ReaImGui re-download on re-run" $Log "Installing ReaImGui"
 Assert-True "exactly one ReaPack binary present (no duplicate downloads)" { (Get-ChildItem -Path (Join-Path $Fake "UserPlugins") -Filter "reaper_reapack*" -ErrorAction SilentlyContinue).Count -eq 1 }
 
 # ============================================================================
-Test-Scenario "ReaImGui already installed -- no bootstrap created"
+Test-Scenario "Only the ReaImGui DLL present (e.g. older installer) -- repaired"
 # ============================================================================
-$Fake = Join-Path $WorkDir "s3_has_imgui"
+$Fake = Join-Path $WorkDir "s3_dll_only"
 New-Item -ItemType Directory -Path (Join-Path $Fake "UserPlugins") -Force | Out-Null
-New-Item -ItemType File -Path (Join-Path $Fake "UserPlugins\reaper_imgui.dll") -Force | Out-Null
+New-Item -ItemType File -Path (Join-Path $Fake $ImguiDll) -Force | Out-Null
 Invoke-Install $Fake "false" | Out-Null
-Assert-False "no __startup.lua written when ReaImGui already present (direct download)" { Test-Path (Join-Path $Fake "Scripts\__startup.lua") }
+Assert-True "missing imgui.py gets installed" { Test-Path (Join-Path $Fake $ImguiPy) -PathType Leaf }
+Assert-True "placeholder DLL replaced with the real one" { (Get-Item (Join-Path $Fake $ImguiDll)).Length -gt 100000 }
+Assert-False "no __startup.lua written (direct download, no ReaPack bootstrap)" { Test-Path (Join-Path $Fake "Scripts\__startup.lua") }
 Assert-True "ReaPack still installed independently" { (Get-ChildItem -Path (Join-Path $Fake "UserPlugins") -Filter "reaper_reapack*" -ErrorAction SilentlyContinue).Count -gt 0 }
 
 # ============================================================================
@@ -142,8 +229,6 @@ New-Item -ItemType Directory -Path (Join-Path $Fake "Scripts") -Force | Out-Null
 Set-Content -Path (Join-Path $Fake "Scripts\__startup.lua") -Value "-- my own startup stuff, unrelated to MIDI-GPT`nreaper.ShowConsoleMsg(`"hello from my own script`n`")"
 Invoke-Install $Fake "false" | Out-Null
 Assert-Contains "user's own startup content survives" (Join-Path $Fake "Scripts\__startup.lua") "hello from my own script"
-# With direct download, __startup.lua is never touched.
-Assert-Contains "user's content still survives after a second run" (Join-Path $Fake "Scripts\__startup.lua") "hello from my own script"
 Invoke-Install $Fake "false" | Out-Null
 Assert-Contains "user's content still survives after a second run" (Join-Path $Fake "Scripts\__startup.lua") "hello from my own script"
 
@@ -152,35 +237,57 @@ Test-Scenario "REAPER 'running' (non-interactive) -- ReaPack/reaper.ini must be 
 # ============================================================================
 $Fake = Join-Path $WorkDir "s5_running"
 New-Item -ItemType Directory -Path $Fake -Force | Out-Null
+Write-Ini (Join-Path $Fake "reaper.ini") "[reaper]`r`nsomeoption=1`r`n"
 Invoke-Install $Fake "true" | Out-Null
 Assert-True "junction still created (doesn't need REAPER closed)" { Test-Path (Join-Path $Fake "Scripts\MIDI-GPT") }
 Assert-False "ReaPack NOT downloaded while REAPER is 'running'" { (Test-Path (Join-Path $Fake "UserPlugins")) -and ((Get-ChildItem -Path (Join-Path $Fake "UserPlugins") -Filter "reaper_reapack*" -ErrorAction SilentlyContinue).Count -gt 0) }
-Assert-Contains "explains ReaPack was skipped because REAPER is open" (Join-Path $WorkDir "last_run.log") "REAPER is still open"
+Assert-Contains "explains ReaPack was skipped because REAPER is open" $Log "REAPER is still open"
+Assert-True "reaper.ini left untouched (REAPER would overwrite it on quit)" { [System.IO.File]::ReadAllText((Join-Path $Fake "reaper.ini")) -ceq "[reaper]`r`nsomeoption=1`r`n" }
 
 # ============================================================================
-Test-Scenario "reaper.ini exists with unrelated content, REAPER not running"
+Test-Scenario "reaper.ini as REAPER writes it on Windows ([reaper], CRLF)"
 # ============================================================================
-$Fake = Join-Path $WorkDir "s6_existing_ini"
-New-Item -ItemType Directory -Path $Fake -Force | Out-Null
-Set-Content -Path (Join-Path $Fake "reaper.ini") -Value "[REAPER]`nsomeoption=1`notheroption=hello"
+$Fake = Join-Path $WorkDir "s6_real_ini"
+$Ini = Join-Path $Fake "reaper.ini"
+$Original = "[reaper]`r`nsomeoption=1`r`notheroption=hello`r`n[audioconfig]`r`nsrate=48000`r`n"
+Write-Ini $Ini $Original
 Invoke-Install $Fake "false" | Out-Null
-Assert-Contains "unrelated pre-existing option survives" (Join-Path $Fake "reaper.ini") "someoption=1"
-Assert-Contains "unrelated pre-existing option survives (2)" (Join-Path $Fake "reaper.ini") "otheroption=hello"
-Assert-Contains "reascript=1 was added" (Join-Path $Fake "reaper.ini") "reascript=1"
-Assert-Contains "pythonlibdll64 was added" (Join-Path $Fake "reaper.ini") "pythonlibdll64="
-Assert-True "reaper.ini.midigpt-backup was created" { Test-Path (Join-Path $Fake "reaper.ini.midigpt-backup") }
+Assert-IniWellFormed "after first run" $Ini
+Assert-True "unrelated options survive in their sections" { $S = Get-ReaperSection $Ini; $S["someoption"] -eq "1" -and $S["otheroption"] -eq "hello" }
+Assert-Contains "other sections survive" $Ini "[audioconfig]`r`nsrate=48000"
+Assert-False "no bare LF line endings introduced" { [System.IO.File]::ReadAllText($Ini) -match "[^`r]`n" }
+Assert-True "reaper.ini.midigpt-backup holds the original bytes" { [System.IO.File]::ReadAllText("$Ini.midigpt-backup") -ceq $Original }
 
 Invoke-Install $Fake "false" | Out-Null
-Assert-GrepCount "exactly one reascript= line after two runs" 1 "reascript=1" (Join-Path $Fake "reaper.ini")
+Assert-IniWellFormed "after second run" $Ini
+Assert-GrepCount "exactly one reascript= line after two runs" 1 "reascript=" $Ini
+Assert-GrepCount "exactly one pythonlibdll64= line after two runs" 1 "pythonlibdll64=" $Ini
 
 # ============================================================================
-Test-Scenario "reaper.ini with lowercase [reaper] section header"
+Test-Scenario "reaper.ini with uppercase [REAPER] header and LF endings"
 # ============================================================================
-$Fake = Join-Path $WorkDir "s7_lowercase_section"
-New-Item -ItemType Directory -Path $Fake -Force | Out-Null
-Set-Content -Path (Join-Path $Fake "reaper.ini") -Value "[reaper]`nsomeoption=1"
+$Fake = Join-Path $WorkDir "s7_uppercase_lf"
+$Ini = Join-Path $Fake "reaper.ini"
+Write-Ini $Ini "[REAPER]`nsomeoption=1`n"
 Invoke-Install $Fake "false" | Out-Null
-Assert-Contains "reascript=1 added under lowercase [reaper] section" (Join-Path $Fake "reaper.ini") "reascript=1"
+Assert-IniWellFormed "uppercase header" $Ini
+Assert-False "LF file stays LF (no CRLF mixed in)" { [System.IO.File]::ReadAllText($Ini) -match "`r" }
+
+# ============================================================================
+Test-Scenario "reaper.ini with non-ASCII paths (UTF-8) survives byte-for-byte"
+# ============================================================================
+$Fake = Join-Path $WorkDir "s8_utf8"
+$Ini = Join-Path $Fake "reaper.ini"
+# Regression guard only: on a Windows-1252 machine (GitHub's runners, this
+# test's usual home) even an ANSI read/write round trip happens to be
+# byte-lossless, so this can't catch an encoding regression there -- it
+# would on a multi-byte ANSI codepage (e.g. Japanese, cp932).
+$Accented = "C:\Users\$([char]0xC1)lvaro Jos$([char]0xE9)\Ma$([char]0xF1)ana $([char]0x97F3)$([char]0x697D).rpp"
+Write-Ini $Ini "[reaper]`r`nlastproject=$Accented`r`n"
+Invoke-Install $Fake "false" | Out-Null
+Assert-IniWellFormed "non-ASCII ini" $Ini
+Assert-True "non-ASCII path unchanged" { (Get-ReaperSection $Ini)["lastproject"] -ceq $Accented }
+Assert-False "no BOM added" { $B = [System.IO.File]::ReadAllBytes($Ini); $B[0] -eq 0xEF -and $B[1] -eq 0xBB }
 
 # ============================================================================
 Remove-Item -Path $WorkDir -Recurse -Force -ErrorAction SilentlyContinue

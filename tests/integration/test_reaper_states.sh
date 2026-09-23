@@ -17,9 +17,13 @@
 # idempotent. It does NOT and CANNOT prove REAPER itself loads any of this
 # correctly -- that needs a real REAPER session.
 #
-# This does hit the real network for ReaPack's GitHub release (needed to
-# test the actual download+checksum path for real) -- everything else here
-# is local file state.
+# Assertions check the resulting files, not just log wording: the installer
+# deliberately exits 0 with a [WARN] when something it tried failed, so
+# "the log mentions X" passes whether X succeeded or not.
+#
+# This hits the real network for ReaPack's GitHub release and ReaImGui's
+# codeberg release (to test the actual download paths for real) --
+# everything else here is local file state.
 #
 # Usage:
 #   ./tests/integration/test_reaper_states.sh
@@ -92,6 +96,52 @@ assert_line_count() {
     fi
 }
 
+assert_not_contains() {
+    local desc="$1" file="$2" needle="$3"
+    TESTS=$((TESTS + 1))
+    if [ -f "$file" ] && ! grep -qF -- "$needle" "$file" 2>/dev/null; then
+        pass "$desc"
+    else
+        fail_test "$desc"
+    fi
+}
+
+# Lines of reaper.ini's first [reaper] section (header matched
+# case-insensitively, as REAPER does) -- i.e. what REAPER actually reads.
+# Keys written into any other section, or a duplicate [REAPER] section
+# further down, don't count.
+reaper_section() {
+    awk '
+        /^\[.*\][ \t]*$/ {
+            if (seen) exit
+            in_s = (tolower($0) ~ /^\[reaper\][ \t]*$/)
+            if (in_s) seen = 1
+            next
+        }
+        in_s { print }
+    ' "$1"
+}
+
+# Value of a key inside reaper.ini's [reaper] section (empty if absent).
+reaper_key() { reaper_section "$1" | sed -n "s/^$2=//p" | head -n 1; }
+
+# The shape checks every reaper.ini the installer touched must pass.
+assert_ini_well_formed() {
+    local label="$1" ini="$2" libdir libfile
+    assert_true "$label -- exactly one [reaper] section (case-insensitive)" \
+        bash -c "[ \$(grep -ci '^\[reaper\]' '$ini') -eq 1 ]"
+    assert_true "$label -- reascript=1 is inside the [reaper] section" \
+        test "$(reaper_key "$ini" reascript)" = "1"
+    libdir="$(reaper_key "$ini" pythonlibpath64)"
+    libfile="$(reaper_key "$ini" pythonlibdll64)"
+    assert_true "$label -- pythonlibpath64/pythonlibdll64 are inside the [reaper] section" \
+        test -n "$libdir" -a -n "$libfile"
+    assert_true "$label -- they point to an existing libpython ($libdir/$libfile)" \
+        test -f "$libdir/$libfile"
+    assert_false "$label -- the library isn't inside a venv" \
+        bash -c "case '$libdir' in */.venv/*|*/.venv) exit 0 ;; *) exit 1 ;; esac"
+}
+
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/midigpt-reaper-states-test.XXXXXX")"
 cleanup() { rm -rf "$WORK_DIR"; }
 trap cleanup EXIT
@@ -127,9 +177,14 @@ TESTS=$((TESTS + 1))
 if [ "$RUN_EXIT" -eq 0 ]; then pass "install.sh exits 0"; else fail_test "install.sh exited $RUN_EXIT"; fi
 assert_true  "symlink created" test -L "$FAKE/Scripts/MIDI-GPT"
 assert_true  "ReaPack binary downloaded" bash -c "find '$FAKE/UserPlugins' -iname 'reaper_reapack*' | grep -q ."
-assert_contains "ReaPack reported checksum-verified" "$WORK_DIR/last_run.log" "checksum-verified"
-# With direct download approach, ReaImGui is installed immediately (no bootstrap)
-assert_contains "ReaImGui complete package installed" "$WORK_DIR/last_run.log" "ReaImGui"
+assert_contains "ReaPack checksum-verified against GitHub's digest" "$WORK_DIR/last_run.log" \
+    "ReaPack installed and checksum-verified"
+# Check the files, not the log: "ReaImGui not installed" also mentions ReaImGui.
+assert_true  "ReaImGui native binary installed (non-empty)" \
+    bash -c "find '$FAKE/UserPlugins' -name 'reaper_imgui-*' -size +100k | grep -q ."
+assert_true  "ReaImGui Python API installed (imgui.py -- the dashboard imports it)" \
+    test -s "$FAKE/Scripts/ReaTeam Extensions/API/imgui.py"
+assert_not_contains "no ReaImGui download-failure warning" "$WORK_DIR/last_run.log" "ReaImGui download failed"
 assert_contains "reports reaper.ini not found (fresh REAPER, never launched)" "$WORK_DIR/last_run.log" \
     "reaper.ini not found"
 
@@ -139,19 +194,23 @@ scenario "Re-run on the same state (idempotency)"
 run_install "$FAKE" false
 assert_contains "second run detects ReaPack already installed (no re-download)" "$WORK_DIR/last_run.log" \
     "ReaPack already installed"
-# ReaImGui should not be re-downloaded on re-run
-assert_true "no duplicate ReaImGui download on re-run" bash -c "! grep -q 'Installing ReaImGui' '$WORK_DIR/last_run.log'"
+assert_contains "second run detects ReaImGui already installed" "$WORK_DIR/last_run.log" \
+    "ReaImGui already installed"
+assert_not_contains "no ReaImGui re-download on re-run" "$WORK_DIR/last_run.log" "Installing ReaImGui"
 assert_line_count "exactly one ReaPack binary present (no duplicate downloads)" 1 \
     find "$FAKE/UserPlugins" -iname "reaper_reapack*"
 
 # ============================================================================
-scenario "ReaImGui already installed -- no re-download"
+scenario "Only the ReaImGui binary present (e.g. older installer) -- repaired"
 # ============================================================================
-FAKE="$WORK_DIR/s3_has_imgui"
+FAKE="$WORK_DIR/s3_binary_only"
 mkdir -p "$FAKE/UserPlugins"
-touch "$FAKE/UserPlugins/reaper_imgui.dylib"
+touch "$FAKE/UserPlugins/reaper_imgui-placeholder"
 run_install "$FAKE" false
-assert_false "no __startup.lua written (we don't use bootstrap anymore)" test -f "$FAKE/Scripts/__startup.lua"
+assert_true  "missing imgui.py gets installed" test -s "$FAKE/Scripts/ReaTeam Extensions/API/imgui.py"
+assert_true  "the real native binary gets installed" \
+    bash -c "find '$FAKE/UserPlugins' -name 'reaper_imgui-*' -size +100k | grep -q ."
+assert_false "no __startup.lua written (direct download, no ReaPack bootstrap)" test -f "$FAKE/Scripts/__startup.lua"
 assert_true  "ReaPack still installed independently" bash -c "find '$FAKE/UserPlugins' -iname 'reaper_reapack*' | grep -q ."
 
 # ============================================================================
@@ -165,9 +224,6 @@ reaper.ShowConsoleMsg("hello from my own script\n")
 EOF
 run_install "$FAKE" false
 assert_contains "user's own startup content survives" "$FAKE/Scripts/__startup.lua" "hello from my own script"
-# With direct download, __startup.lua is never touched.
-assert_contains "user's content still survives after a second run" "$FAKE/Scripts/__startup.lua" \
-    "hello from my own script"
 run_install "$FAKE" false
 assert_contains "user's content still survives after a second run" "$FAKE/Scripts/__startup.lua" \
     "hello from my own script"
@@ -197,30 +253,35 @@ cat > "$FAKE/reaper.ini" << 'EOF'
 someoption=1
 otheroption=hello
 EOF
+cp "$FAKE/reaper.ini" "$WORK_DIR/s6_original.ini"
 run_install "$FAKE" false
-assert_contains "unrelated pre-existing option survives" "$FAKE/reaper.ini" "someoption=1"
-assert_contains "unrelated pre-existing option survives (2)" "$FAKE/reaper.ini" "otheroption=hello"
-assert_contains "reascript=1 was added" "$FAKE/reaper.ini" "reascript=1"
-assert_contains "pythonlibdll64 was added" "$FAKE/reaper.ini" "pythonlibdll64="
-assert_true "reaper.ini.midigpt-backup was created" test -f "$FAKE/reaper.ini.midigpt-backup"
+assert_ini_well_formed "after first run" "$FAKE/reaper.ini"
+assert_true "unrelated options survive in the [reaper] section" \
+    bash -c "[ \"\$1\" = 1 ] && [ \"\$2\" = hello ]" _ \
+    "$(reaper_key "$FAKE/reaper.ini" someoption)" "$(reaper_key "$FAKE/reaper.ini" otheroption)"
+assert_true "reaper.ini.midigpt-backup holds the original" cmp -s "$FAKE/reaper.ini.midigpt-backup" "$WORK_DIR/s6_original.ini"
 
 # ── Re-run: keys should update in place, not duplicate ──
 run_install "$FAKE" false
+assert_ini_well_formed "after second run" "$FAKE/reaper.ini"
 assert_line_count "exactly one reascript= line after two runs" 1 grep "^reascript=" "$FAKE/reaper.ini"
 assert_line_count "exactly one pythonlibdll64= line after two runs" 1 grep "^pythonlibdll64=" "$FAKE/reaper.ini"
 
 # ============================================================================
-scenario "reaper.ini with lowercase [reaper] section header"
+scenario "reaper.ini with lowercase [reaper] section header and another section"
 # ============================================================================
 FAKE="$WORK_DIR/s7_lowercase_section"
 mkdir -p "$FAKE"
 cat > "$FAKE/reaper.ini" << 'EOF'
 [reaper]
 someoption=1
+[audioconfig]
+srate=48000
 EOF
 run_install "$FAKE" false
-assert_contains "reascript=1 added under lowercase [reaper] section" "$FAKE/reaper.ini" "reascript=1"
-assert_true "no duplicate [REAPER] section created" bash -c "[ \$(grep -ci '^\[reaper\]' '$FAKE/reaper.ini') -eq 1 ]"
+assert_ini_well_formed "lowercase header" "$FAKE/reaper.ini"
+assert_true "keys didn't land in the other section" \
+    bash -c "! sed -n '/^\[audioconfig\]/,\$p' '$FAKE/reaper.ini' | grep -qE '^(reascript|pythonlib)'"
 
 # ============================================================================
 echo ""

@@ -25,7 +25,7 @@ WORK_DIR=""
 
 # ── Colors ──────────────────────────────────────────────────────
 RED='\033[0;31m'
-GREEN='\033[0;32'
+GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BOLD='\033[1m'
 NC='\033[0m'
@@ -155,12 +155,20 @@ info "Running install.sh ..."
 echo ""
 
 INSTALL_LOG="$WORK_DIR/install.log"
-# --skip-reaper-config avoids mutating a real reaper.ini; MIDIGPT_REAPER_DIR
-# (see install.sh) points the REAPER integration step at a throwaway
-# directory instead of the real REAPER install, so this test never touches
-# the machine's actual REAPER config either.
+# MIDIGPT_REAPER_DIR (see install.sh) points the REAPER integration steps at
+# a throwaway directory instead of the real REAPER install, so this test
+# never touches the machine's actual REAPER config. It gets a reaper.ini so
+# Step 5 runs for real -- including its Python library lookup with the venv
+# active, which is what a normal install does and what
+# test_reaper_states.sh's --reaper-only runs can't cover.
 export MIDIGPT_REAPER_DIR="$WORK_DIR/fake-reaper"
-if bash "$CLONE_DIR/install.sh" --skip-reaper-config 2>&1 | tee "$INSTALL_LOG"; then
+# The fake REAPER dir isn't the running REAPER's, so a real REAPER open on
+# this machine (a developer's, say) mustn't make the installer skip
+# ReaPack/reaper.ini here.
+export MIDIGPT_FAKE_REAPER_RUNNING=false
+FAKE_INI="$MIDIGPT_REAPER_DIR/reaper.ini"
+printf '[REAPER]\nsomeoption=1\n[audioconfig]\nsrate=48000\n' > "$FAKE_INI"
+if bash "$CLONE_DIR/install.sh" < /dev/null 2>&1 | tee "$INSTALL_LOG"; then
     echo ""
     pass "install.sh completed successfully"
 else
@@ -199,15 +207,69 @@ assert "import midigpt.inference" bash -c "source '$VENV' && python -c 'from mid
 # support in favor of the dashboard-only workflow.
 assert_link "$MIDIGPT_REAPER_DIR/Scripts/MIDI-GPT"
 
-# 6. Run unit tests
+# 6. torch actually loads (not just "is installed").
+assert "import torch" bash -c "source '$VENV' && python -c 'import torch'"
+
+# 7. ReaImGui: the native binary plus the Python API the dashboard imports.
+assert "ReaImGui native binary installed" \
+    bash -c "find '$MIDIGPT_REAPER_DIR/UserPlugins' -name 'reaper_imgui-*' -size +100k | grep -q ."
+assert "ReaImGui Python API installed (imgui.py)" \
+    test -s "$MIDIGPT_REAPER_DIR/Scripts/ReaTeam Extensions/API/imgui.py"
+
+# 8. reaper.ini: keys in the existing [REAPER] section (the only one REAPER
+# reads), pointing at the base Python's shared library -- not the venv.
+ini_section() {
+    awk '/^\[.*\][ \t]*$/ { if (seen) exit; in_s = (tolower($0) ~ /^\[reaper\]/); if (in_s) seen = 1; next }
+         in_s { print }' "$FAKE_INI"
+}
+ini_key() { ini_section | sed -n "s/^$1=//p" | head -n 1; }
+PY_LIB_DIR="$(ini_key pythonlibpath64)"
+PY_LIB_FILE="$(ini_key pythonlibdll64)"
+assert "reaper.ini has exactly one [reaper] section" bash -c "[ \$(grep -ci '^\[reaper\]' '$FAKE_INI') -eq 1 ]"
+assert "reascript=1 inside [reaper]" test "$(ini_key reascript)" = "1"
+assert "pythonlibpath64/pythonlibdll64 inside [reaper] point to an existing libpython ($PY_LIB_DIR/$PY_LIB_FILE)" \
+    test -n "$PY_LIB_FILE" -a -f "$PY_LIB_DIR/$PY_LIB_FILE"
+assert "the Python library isn't inside the venv" \
+    bash -c "case '$PY_LIB_DIR' in '$CLONE_DIR/.venv'*) exit 1 ;; *) exit 0 ;; esac"
+
+# 9. No unexpected warnings. install.sh deliberately exits 0 when a step
+# fails but has a manual fallback -- a [WARN] line is the only trace of
+# that, so every warning a clean install can legitimately print is listed
+# here and anything else fails the test.
+ALLOWED_WARNINGS=(
+    # codeberg publishes no checksums for ReaImGui (see install.sh).
+    "No published checksum for ReaImGui"
+    # macOS: no Full Disk Access for the Desktop when run non-interactively.
+    "Couldn't create Desktop shortcut"
+)
+# $'\033' rather than sed's \x1b, which BSD sed (macOS) doesn't support;
+# `|| true` because grep exits 1 when there are no warnings at all, which
+# pipefail + set -e would otherwise turn into aborting this script.
+ESC=$'\033'
+UNEXPECTED_WARNINGS="$(sed "s/${ESC}\[[0-9;]*m//g" "$INSTALL_LOG" | { grep '^\[WARN\]' || true; } | while IFS= read -r line; do
+    allowed=false
+    for w in "${ALLOWED_WARNINGS[@]}"; do
+        case "$line" in *"$w"*) allowed=true ;; esac
+    done
+    [ "$allowed" = true ] || printf '%s\n' "$line"
+done)"
+TESTS=$((TESTS + 1))
+if [ -z "$UNEXPECTED_WARNINGS" ]; then
+    pass "no unexpected [WARN] lines in the install log"
+else
+    fail_test "unexpected [WARN] lines in the install log:"
+    printf '%s\n' "$UNEXPECTED_WARNINGS" | sed 's/^/        /'
+fi
+
+# 10. Run unit tests
 echo ""
 info "Installing pytest and running unit tests..."
 # -k filter matches the dedicated unit-tests CI job: test_piano_default is
 # a known pre-existing failure unrelated to install correctness (see
 # .github/workflows/test-install.yml for why).
+TESTS=$((TESTS + 1))
 if bash -c "source '$VENV' && pip install pytest -q && cd '$CLONE_DIR' && python -m pytest tests/ -v --tb=short -k 'not test_piano_default'" 2>&1; then
     pass "Unit tests passed"
-    TESTS=$((TESTS + 1))
 else
     fail_test "Unit tests failed"
 fi
