@@ -17,8 +17,7 @@ name: Test install.sh / install.ps1
 #   - install.ps1's helper functions (tests/integration/
 #     test_install_helpers.ps1), for the Windows failure modes these runners
 #     can't reproduce: they ship with the MSVC runtime PyTorch needs, so a
-#     machine without it can only be tested on a clean Windows VM (see the
-#     release checklist in README.md).
+#     machine without it can only be tested on a clean Windows machine.
 # See those scripts' headers for exactly what each does and doesn't prove.
 #
 # install.ps1's rewrite (ReaPack/ReaImGui/Arachno/checksum parity with

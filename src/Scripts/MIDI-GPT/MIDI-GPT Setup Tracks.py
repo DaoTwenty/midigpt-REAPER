@@ -273,6 +273,8 @@ def _macos_aria_plist():
     except (OSError, plistlib.InvalidFileException):
         return None
 
+_LINUX_ARIA_CONFIG = "/opt/Plogue/Aria/.config"
+
 def _find_aria_converter():
     """Path to Aria's SoundFont converter (Plogue's RIFF2sfz), installed
     alongside Sforzando, or None. On Windows, Aria registers it under
@@ -303,7 +305,7 @@ def _find_aria_converter():
         return path if os.path.isfile(path) else None
     if system == "Linux":
         try:
-            with open("/opt/Plogue/Aria/.config", encoding="utf-8") as f:
+            with open(_LINUX_ARIA_CONFIG, encoding="utf-8") as f:
                 config = json.load(f)
         except (OSError, ValueError):
             return None

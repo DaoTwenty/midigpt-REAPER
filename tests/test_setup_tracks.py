@@ -255,6 +255,43 @@ class TestBuildSourceTrackChunk:
         assert chunk.endswith("  >\n>\n")
 
 
+class TestFindAriaConverterLinux:
+    """Linux: riff2sfz's path comes from the JSON config the plogue-aria .deb
+    installs at /opt/Plogue/Aria/.config."""
+
+    @pytest.fixture
+    def aria(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(setup_tracks.platform, "system", lambda: "Linux")
+        config = tmp_path / ".config"
+        monkeypatch.setattr(setup_tracks, "_LINUX_ARIA_CONFIG", str(config))
+        converter = tmp_path / "riff2sfz"
+        converter.write_bytes(b"")
+        return config, converter
+
+    def test_uses_sf2_converter_from_config(self, aria):
+        config, converter = aria
+        config.write_text(f'{{"base_dir": "/elsewhere", "Converters": {{"sf2": "{converter}"}}}}')
+        assert setup_tracks._find_aria_converter() == str(converter)
+
+    def test_falls_back_to_base_dir(self, aria):
+        config, converter = aria
+        config.write_text(f'{{"base_dir": "{converter.parent}"}}')
+        assert setup_tracks._find_aria_converter() == str(converter)
+
+    def test_listed_converter_missing(self, aria):
+        config, converter = aria
+        config.write_text(f'{{"Converters": {{"sf2": "{converter.parent / "gone"}"}}}}')
+        assert setup_tracks._find_aria_converter() is None
+
+    def test_no_config(self, aria):
+        assert setup_tracks._find_aria_converter() is None
+
+    def test_malformed_config(self, aria):
+        config, _ = aria
+        config.write_text("{ not json")
+        assert setup_tracks._find_aria_converter() is None
+
+
 class TestEnsureArachnoSfz:
     def _root(self, repo):
         return repo / "soundfonts" / "sfz" / SANITIZED_SF2
