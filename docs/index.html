@@ -607,7 +607,7 @@ Review the draft (its notes are auto-generated, so worth a pass) and publish it 
 
 #### Linux clean-machine check
 
-CI runs the installer on Linux but never starts REAPER or Sforzando, so run this before a release that changes the Linux install path (`install.sh`, Setup Tracks, `dev/dev_reset.sh`). Use a fresh Linux desktop VM, e.g. the current Ubuntu LTS, with nothing from a previous run: REAPER installed from its Linux tarball and launched once, plus Python 3.10–3.12 and git.
+CI runs the installer on Linux but never starts REAPER or Sforzando, so run this before a release that changes the Linux install path (`install.sh`, Setup Tracks, `dev/dev_reset.sh`). Start from a Linux machine with no previous MIDI-GPT or Sforzando install (run `./dev/dev_reset.sh` first if it has one): REAPER installed from its Linux tarball and launched once, plus Python 3.10–3.12 and git.
 
 1. **Sforzando:** download "sforzando for Linux (beta)" from Plogue's [downloads page](https://www.plogue.com/downloads.html#sforzando), unzip it and run `./install_sforzando.sh`.
 2. **Installer:** run `./install.sh` and answer **y** to the Arachno download. Expect no `[WARN]` lines other than "No published checksum for ReaImGui", and `[OK] VST plug-in paths: ...;/usr/lib/vst3`.
