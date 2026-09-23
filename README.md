@@ -44,7 +44,6 @@
   - [Hint Mode, Themes, Settings](#hint-mode-themes-settings)
 - [Usage](#usage)
   - [Quick Start](#quick-start)
-  - [The Standalone Scripts](#the-standalone-scripts)
   - [Selecting Context & Target Bars](#selecting-context-target-bars)
   - [Remote Server Setup](#remote-server-setup)
   - [Tips & Common Gotchas](#tips-common-gotchas)
@@ -160,7 +159,7 @@ Every track gets an **I** (Ignore — exclude this track entirely) and an **A** 
 
 ### Automatic Instrument Detection & Soundfont Setup
 
-**Setup Tracks** / **Setup Selected Tracks** detects each track's GM instrument straight from its MIDI content (channel 10 → drums, otherwise its first Program Change event) and adds a ready-to-play Sforzando + Arachno instance for it — no manual synth routing, no template tracks. Tracks it can't resolve automatically can be confirmed or overridden individually. See [INSTRUMENTS.md](INSTRUMENTS.md) for the full instrument name/keyword reference, and [VST.md](VST.md) for how the automatic setup works under the hood. `MIDI-GPT Replace Instruments.py` force-replaces whatever instrument is on selected tracks, for when you want to redo one by hand.
+**Setup Tracks** / **Setup Selected Tracks** detects each track's GM instrument straight from its MIDI content (channel 10 → drums, otherwise its first Program Change event) and adds a ready-to-play Sforzando + Arachno instance for it — no manual synth routing, no template tracks. Tracks it can't resolve automatically can be confirmed or overridden individually. See [INSTRUMENTS.md](INSTRUMENTS.md) for the full instrument name/keyword reference, and [VST.md](VST.md) for how the automatic setup works under the hood. To redo a track's instrument, select the track, click **Setup Selected Tracks** and choose **Replace it**.
 
 This automatic setup only recognizes Sforzando's **VST or VST3** build in REAPER's plugin list — when installing Sforzando, make sure REAPER has scanned one of those. **AU and CLAP are not supported** (its installer also offers them, but Setup Tracks has no FX chunk format for either). If Setup Tracks reports Sforzando isn't in REAPER's plugin list, check **Options > Preferences > Plug-ins > VST** and rescan.
 
@@ -183,18 +182,6 @@ Open **Settings** from the dashboard's top row to toggle hover hints (off by def
 5. Adjust Global Options and any per-track controls you need.
 6. Click **Generate**. Progress and token usage show in the dashboard's Information tab; results write back into REAPER automatically, or land in a candidate picker if you asked for more than one variation.
 
-### The Standalone Scripts
-
-| Script | What it does |
-|---|---|
-| `MIDI-GPT.py` | The dashboard — everything else here is a button inside it |
-| `MIDI-GPT Generate.py` | Runs one generation request |
-| `MIDI-GPT Set Server.py` | Sets the MIDI-GPT server address |
-| `MIDI-GPT Setup Tracks.py` | Auto-assigns instruments to tracks that don't have one yet |
-| `MIDI-GPT Replace Instruments.py` | Force-replaces the instrument on selected tracks |
-
-Load any of these individually (same **Load ReaScript** steps as [REAPER Setup](#reaper-setup)) if you want a keyboard shortcut for one specific action without opening the dashboard.
-
 ### Selecting Context & Target Bars
 
 The model works in whole bars, on REAPER's own bar grid. Set a time selection (or loop) over the bars you want as context, and select the MIDI item(s) on the track(s) whose overlapping bars should actually be generated — bars that are in range but not selected are sent as context only, not as generation targets.
@@ -203,7 +190,7 @@ If your selection doesn't land exactly on a bar line — for example your song's
 
 ### Remote Server Setup
 
-By default the dashboard talks to a server on `http://127.0.0.1:3456`. If your MIDI-GPT server runs elsewhere (a remote workstation, another machine on your LAN), run `MIDI-GPT Set Server.py` and enter its address, e.g. `192.168.1.20:3456` (`http://` is assumed if you leave it off).
+By default the dashboard talks to a server on `http://127.0.0.1:3456`. If your MIDI-GPT server runs elsewhere (a remote workstation, another machine on your LAN), click **Change...** next to the server address in the dashboard's top row and enter its address, e.g. `192.168.1.20:3456` (`http://` is assumed if you leave it off).
 
 ### Tips & Common Gotchas
 
@@ -282,7 +269,7 @@ Start with REAPER installed from its Linux tarball and launched once, plus Pytho
 
 ### Project Layout
 
-- `src/Scripts/MIDI-GPT/` — the 5 REAPER action scripts, the `midigpt_dashboard/` UI package, and `midi_extraction.py` (the REAPER ↔ MIDI-GPT conversion layer)
+- `src/Scripts/MIDI-GPT/` — the dashboard (`MIDI-GPT.py`) and the 4 helper scripts it runs, the `midigpt_dashboard/` UI package, and `midi_extraction.py` (the REAPER ↔ MIDI-GPT conversion layer)
 - `tests/` — unit tests (`pytest`) plus `tests/integration/` (install-pipeline and REAPER-state coverage, run in CI on macOS/Linux/Windows)
 - `dev/` — maintainer-only tooling (`build_release.sh`, `dev_reset.sh` for macOS/Linux, `dev_reset.ps1` for Windows) — never shipped to end users
 - `install.sh` / `install.ps1` and the clickable launchers — the installer

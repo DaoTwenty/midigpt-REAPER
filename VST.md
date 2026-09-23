@@ -13,9 +13,9 @@ When Sforzando's installer asks which plugin formats to install, pick **VST or V
 **Using it:** from the dashboard (`MIDI-GPT.py`),
 - **Setup Tracks** — detects each track's GM instrument from its MIDI content (channel 10 → drums, otherwise its first Program Change event) and adds a fresh Sforzando+Arachno instance with the correct GM program already selected, for any track that doesn't have an instrument yet. Safe to re-run: it never touches a track's instrument unless it added it in the first place.
 - **Setup Selected Tracks** — same thing, scoped to the current selection instead of the whole project.
-- **`MIDI-GPT Replace Instruments.py`** — force-replaces whatever instrument is on *selected* tracks with a freshly generated one, for when you want to redo a track by hand (e.g. you set the wrong instrument, or want to reset it). Scoped to selection only, since it overwrites.
+- **Replace it** — an option in **Setup Selected Tracks**: replaces whatever instrument is already on the selected tracks with a freshly generated one, for when you want to redo a track (e.g. it has the wrong instrument, or you want to reset it). Only offered for a selection, since it overwrites.
 
-Drums also go through this same path — there's no separate drum plugin involved, Arachno ships its own GM drum kit (bank 128) that Setup Tracks/Replace Instruments select automatically for any track detected as drums.
+Drums also go through this same path — there's no separate drum plugin involved, Arachno ships its own GM drum kit (bank 128) that Setup Tracks selects automatically for any track detected as drums.
 
 Track naming drives all of this — see [INSTRUMENTS.md](INSTRUMENTS.md) for the full name/keyword reference.
 

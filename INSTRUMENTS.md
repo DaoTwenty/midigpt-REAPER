@@ -1,6 +1,6 @@
 # Instrument Names
 
-MIDI-GPT uses General MIDI instrument names to identify tracks. **The track name is ground truth.** `MIDI-GPT Generate.py` resolves it in two steps, in order:
+MIDI-GPT uses General MIDI instrument names to identify tracks. **The track name is ground truth.** MIDI-GPT resolves it in two steps, in order:
 
 1. **Exact match** against one of the 128 canonical internal names in the table below (case-insensitive; spaces and hyphens are treated the same as underscores — `"Baritone Sax"`, `"baritone-sax"`, and `"baritone_sax"` all resolve identically). This always wins when it matches.
 2. Otherwise, a **substring keyword match** against the Keywords column below (case-insensitive, keyword anywhere in the name) — the lowest-numbered program whose keyword appears in the name wins. Most instruments have one or more short, informal keywords for this; some (marked *exact name only*) don't have an informal keyword at all and can only be selected by the exact canonical name from step 1.
