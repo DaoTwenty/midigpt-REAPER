@@ -26,7 +26,7 @@ echo   Press Ctrl+C to stop the server.
 echo.
 
 if "%~1"=="" (
-    midigpt-http --pretrained yellow --port 3456
+    midigpt-http --pretrained yellow_medium --port 3456
 ) else (
     midigpt-http --port 3456 %*
 )

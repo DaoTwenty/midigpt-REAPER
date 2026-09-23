@@ -1129,9 +1129,9 @@ Write-Host "     Needs the ReaImGui extension -- see the warning above if it's m
 Write-Host "     Worth binding it to a toolbar button or keyboard shortcut, since"
 Write-Host "     it's the only action you'll use day to day."
 Write-Host ""
-Write-Host "  If the MIDI-GPT server runs on a different machine, run the"
-Write-Host "  'MIDI-GPT Set Server.py' action (load it the same way) and enter its"
-Write-Host "  IP/domain and port (e.g. http://192.168.1.20:3456). Defaults to"
+Write-Host "  If the MIDI-GPT server runs on a different machine, click 'Change...'"
+Write-Host "  next to the server address in the dashboard and enter its IP/domain"
+Write-Host "  and port (e.g. http://192.168.1.20:3456). Defaults to"
 Write-Host "  http://127.0.0.1:3456."
 Write-Host ""
 } # BackendOnly == false (Next steps in REAPER)

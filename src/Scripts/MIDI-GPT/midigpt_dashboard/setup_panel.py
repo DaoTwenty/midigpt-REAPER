@@ -328,7 +328,13 @@ def draw(ctx, logic=None, window_center=(0, 0)):
         imgui.TextDisabled(ctx, _truncate_to_width(ctx, logic.model_type, _ARCHITECTURE_WIDTH))
         hints.show(ctx, "setup.architecture")
     else:
-        imgui.TextDisabled(ctx, "Model: (checking server...)")
+        # No model list means the last /models query failed (the server was
+        # down or unreachable) -- nothing retries on its own, so offer it.
+        imgui.TextDisabled(ctx, "Model: server not reachable")
+        imgui.SameLine(ctx)
+        if imgui.Button(ctx, "Retry##retry_server") and logic is not None:
+            action = "refresh_model"
+        hints.show(ctx, "setup.retry_server")
 
     if imgui.Button(ctx, "Setup Tracks"):
         _wizard["scope"] = "all"

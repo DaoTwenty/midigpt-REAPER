@@ -12,20 +12,21 @@ import imgui
 # `import` statement syntax -- importlib.import_module() takes the literal
 # string instead, resolved via the same path-based finder.
 setup_tracks = importlib.import_module("MIDI-GPT Setup Tracks")
+from midi_extraction import get_instrument_from_track_name
 
 from . import hints
-from .constants import NOTE_DURATION_LABELS, NOTE_NAMES, SCALE_LABELS, TRACK_ATTRIBUTE_SUPPORT
+from .constants import NOTE_DURATION_LABELS, NOTE_NAMES, SCALE_LABELS, TRACK_ATTRIBUTE_SUPPORT, value_when_enabled
 
 
 def _is_drum_track(name):
     """Best-effort drum/melodic guess from the track's current name alone
-    -- cheap (no MIDI scan) and matches what MIDI-GPT Generate.py's own
-    name-based fallback detection already does for an already-resolved
-    track (see resolve_track_instruments()/detect_instruments()). Only
-    used to decide which Core controls to show; the actual request-time
-    detection in _compute_track_prompt_fields() reads real MIDI content
-    too and is authoritative regardless of what this guesses."""
-    return setup_tracks.GM_NAME_TO_INSTRUMENT.get((name or "").strip()) == 128
+    -- cheap (no MIDI scan), using the same name rules generation applies
+    first (exact GM name, then drum keywords like "kick" or "snare"; see
+    get_instrument_from_track_name()). Only used to decide which Core
+    controls to show; request-time detection also falls back to the MIDI
+    content (channel 10) for names that match nothing, and is
+    authoritative regardless of what this guesses."""
+    return get_instrument_from_track_name((name or "").strip()) == 128
 
 
 def draw(ctx, state, model_type="yellow"):
@@ -96,6 +97,8 @@ def draw(ctx, state, model_type="yellow"):
                             hints.show(ctx, "tracks.density_limit_enabled")
                             if changed:
                                 settings["density_limit_enabled"] = value
+                                if value:
+                                    settings["density"] = value_when_enabled("density", settings["density"])
                             imgui.BeginDisabled(ctx, not settings["density_limit_enabled"])
                             changed, value = imgui.SliderInt(ctx, "Max density", settings["density"], 1, 10)
                             hints.show(ctx, "tracks.density_max")
@@ -111,6 +114,9 @@ def draw(ctx, state, model_type="yellow"):
                             hints.show(ctx, "tracks.polyphony_limit_enabled")
                             if changed:
                                 settings["polyphony_limit_enabled"] = value
+                                if value:
+                                    settings["min_polyphony_q"] = value_when_enabled("min_polyphony_q", settings["min_polyphony_q"])
+                                    settings["max_polyphony_q"] = value_when_enabled("max_polyphony_q", settings["max_polyphony_q"])
                             imgui.BeginDisabled(ctx, not settings["polyphony_limit_enabled"])
                             changed, value = imgui.SliderInt(ctx, "Minimum voices", settings["min_polyphony_q"], 1, 10)
                             hints.show(ctx, "tracks.polyphony_min")

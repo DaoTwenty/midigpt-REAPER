@@ -37,8 +37,10 @@ DEFAULT_TRACK_SETTINGS = {
 # there are flat, model-wide booleans: nothing about which model_dim
 # values are actually valid for a checkpoint, and nothing about which
 # per-track attribute a control maps to actually applies to a drum vs.
-# melodic track). Filled in for "yellow" from values already known;
-# other model types are left out on purpose -- a model_type missing here
+# melodic track). MODEL_DIM_OPTIONS is filled in for "yellow" only;
+# TRACK_ATTRIBUTE_SUPPORT for every model type, mirroring the role checks
+# in MIDI-GPT Generate.py's _compute_track_prompt_fields(). Any model type
+# left out on purpose -- a model_type missing here
 # means "no constraint known, don't restrict the UI" (see
 # MODEL_DIM_OPTIONS.get(model_type) / TRACK_ATTRIBUTE_SUPPORT.get(model_type)
 # both returning None at the call sites), not "this model has no limits."
@@ -55,12 +57,46 @@ MODEL_DIM_OPTIONS = {
 # this for "yellow" (e.g. a density limit set on a melodic track is just
 # never sent) -- this is the same mapping, used to hide the control in the
 # UI instead of showing one that quietly does nothing.
-TRACK_ATTRIBUTE_SUPPORT = {
-    "yellow": {
-        "drum": {"density"},
-        "melodic": {"polyphony", "duration"},
-    },
+_DRUM_DENSITY_MELODIC_POLY_DURATION = {
+    "drum": {"density"},
+    "melodic": {"polyphony", "duration"},
 }
+TRACK_ATTRIBUTE_SUPPORT = {
+    "yellow": _DRUM_DENSITY_MELODIC_POLY_DURATION,
+    # Prism/Expressive send the same Core controls per role (as bar-level
+    # attributes rather than track-level ones -- same effect in the UI).
+    "prism": _DRUM_DENSITY_MELODIC_POLY_DURATION,
+    "expressive": _DRUM_DENSITY_MELODIC_POLY_DURATION,
+}
+
+# Where a slider starts when its Enable/Limit checkbox is ticked. While the
+# box is off, the panels force the slider to an "off" value (0, or 1.0 for
+# Top-p) that is outside its range or has no effect, so without this a
+# freshly ticked box still meant "off" until the slider was dragged.
+ENABLE_START_VALUES = {
+    # Global settings
+    "top_p": 0.9,
+    "top_k": 50,
+    "mask_k": 1,
+    "polyphony_hard_limit": 4,
+    "density_hard_limit": 16,
+    # Per-track settings
+    "density": 5,
+    "min_polyphony_q": 1,
+    "max_polyphony_q": 10,
+}
+_OFF_VALUES = {"top_p": 1.0}
+
+
+def value_when_enabled(key, current):
+    """The value a setting's slider should hold right after its checkbox is
+    ticked: its ENABLE_START_VALUES entry if it's still at its "off" value,
+    otherwise the value the user already chose."""
+    start = ENABLE_START_VALUES.get(key)
+    if start is None or current != _OFF_VALUES.get(key, 0):
+        return current
+    return start
+
 
 DEFAULT_GLOBAL_SETTINGS = {
     "temperature": 1.0,

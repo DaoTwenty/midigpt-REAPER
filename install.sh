@@ -1068,9 +1068,9 @@ echo "     Needs the ReaImGui extension -- see the warning above if it's missing
 echo "     Worth binding it to a toolbar button or keyboard shortcut, since"
 echo "     it's the only action you'll use day to day."
 echo ""
-echo "  If the MIDI-GPT server runs on a different machine, run the"
-echo "  'MIDI-GPT Set Server.py' action (load it the same way) and enter its"
-echo "  IP/domain and port (e.g. http://192.168.1.20:3456). Defaults to"
+echo "  If the MIDI-GPT server runs on a different machine, click 'Change...'"
+echo "  next to the server address in the dashboard and enter its IP/domain"
+echo "  and port (e.g. http://192.168.1.20:3456). Defaults to"
 echo "  http://127.0.0.1:3456."
 echo ""
 fi # BACKEND_ONLY == false (REAPER-side next steps)

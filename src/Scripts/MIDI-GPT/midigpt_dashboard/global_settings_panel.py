@@ -8,7 +8,7 @@ sys.path.append(RPR_GetResourcePath() + "/Scripts/ReaTeam Extensions/API")
 import imgui
 
 from . import hints
-from .constants import MODEL_DIM_OPTIONS, VALIDATION_LABELS
+from .constants import MODEL_DIM_OPTIONS, VALIDATION_LABELS, value_when_enabled
 
 
 def _draw_context_length(ctx, params, model_type):
@@ -89,6 +89,8 @@ def draw(ctx, params, model_type="yellow"):
         hints.show(ctx, "global.top_p_enabled")
         if changed:
             params["top_p_enabled"] = value
+            if value:
+                params["top_p"] = value_when_enabled("top_p", params["top_p"])
         imgui.BeginDisabled(ctx, not params["top_p_enabled"])
         changed, value = imgui.SliderDouble(ctx, "Top-p", params["top_p"], 0.0, 1.0, "%.2f")
         hints.show(ctx, "global.top_p")
@@ -101,6 +103,8 @@ def draw(ctx, params, model_type="yellow"):
         hints.show(ctx, "global.top_k_enabled")
         if changed:
             params["top_k_enabled"] = value
+            if value:
+                params["top_k"] = value_when_enabled("top_k", params["top_k"])
         imgui.BeginDisabled(ctx, not params["top_k_enabled"])
         changed, value = imgui.SliderInt(ctx, "Top-k", params["top_k"], 1, 500)
         hints.show(ctx, "global.top_k")
@@ -126,6 +130,8 @@ def draw(ctx, params, model_type="yellow"):
         hints.show(ctx, "global.mask_k_enabled")
         if changed:
             params["mask_k_enabled"] = value
+            if value:
+                params["mask_k"] = value_when_enabled("mask_k", params["mask_k"])
         imgui.BeginDisabled(ctx, not params["mask_k_enabled"])
         changed, value = imgui.SliderInt(ctx, "Mask count", params["mask_k"], 1, 100)
         hints.show(ctx, "global.mask_k")
@@ -142,6 +148,8 @@ def draw(ctx, params, model_type="yellow"):
         hints.show(ctx, "global.polyphony_limit_enabled")
         if changed:
             params["polyphony_limit_enabled"] = value
+            if value:
+                params["polyphony_hard_limit"] = value_when_enabled("polyphony_hard_limit", params["polyphony_hard_limit"])
         imgui.BeginDisabled(ctx, not params["polyphony_limit_enabled"])
         changed, value = imgui.SliderInt(ctx, "Maximum voices", params["polyphony_hard_limit"], 1, 32)
         hints.show(ctx, "global.polyphony_max")
@@ -155,6 +163,8 @@ def draw(ctx, params, model_type="yellow"):
         hints.show(ctx, "global.density_limit_enabled")
         if changed:
             params["density_limit_enabled"] = value
+            if value:
+                params["density_hard_limit"] = value_when_enabled("density_hard_limit", params["density_hard_limit"])
         imgui.BeginDisabled(ctx, not params["density_limit_enabled"])
         changed, value = imgui.SliderInt(ctx, "Maximum notes", params["density_hard_limit"], 1, 64)
         hints.show(ctx, "global.density_max")
