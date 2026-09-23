@@ -37,6 +37,7 @@ alone.
 import sys
 import base64
 import glob
+import json
 import os
 import platform
 import shutil
@@ -279,7 +280,9 @@ def _find_aria_converter():
     macOS, it lives at <base_dir>/RIFF2sfz, next to Aria.bundle, where
     base_dir is read from Aria's own preferences plist (confirmed on a
     real install: RIFF2sfz 1.98, same "input output_path results.txt"
-    argument order as Windows)."""
+    argument order as Windows). On Linux, the plogue-aria .deb installs it
+    as <base_dir>/riff2sfz and lists it in /opt/Plogue/Aria/.config, a JSON
+    file Aria and Sforzando read from that fixed path."""
     system = platform.system()
     if system == "Windows":
         try:
@@ -297,6 +300,15 @@ def _find_aria_converter():
         if not base_dir:
             return None
         path = os.path.join(base_dir, "RIFF2sfz")
+        return path if os.path.isfile(path) else None
+    if system == "Linux":
+        try:
+            with open("/opt/Plogue/Aria/.config", encoding="utf-8") as f:
+                config = json.load(f)
+        except (OSError, ValueError):
+            return None
+        path = (config.get("Converters") or {}).get("sf2") \
+            or os.path.join(config.get("base_dir", ""), "riff2sfz")
         return path if os.path.isfile(path) else None
     return None
 
