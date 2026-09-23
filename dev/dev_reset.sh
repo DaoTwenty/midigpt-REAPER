@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # ============================================================================
-# MIDI-GPT for REAPER -- Dev Reset (NOT for end users)
+# MIDI-GPT for REAPER -- Dev Reset, macOS/Linux (NOT for end users)
+#
+# On Windows, use dev_reset.ps1 instead.
 #
 # Wipes everything install.sh sets up (and a few things it only points at),
 # so you can re-run the installer and test the whole flow from scratch:
@@ -72,7 +74,7 @@ OS="$(uname -s)"
 case "$OS" in
     Darwin)       PLATFORM="macos";   REAPER_DIR="$HOME/Library/Application Support/REAPER" ;;
     Linux)        PLATFORM="linux";   REAPER_DIR="$HOME/.config/REAPER" ;;
-    MINGW*|MSYS*) PLATFORM="windows"; REAPER_DIR="${APPDATA:-}/REAPER" ;;
+    MINGW*|MSYS*) echo "On Windows, use the PowerShell version instead: .\\dev\\dev_reset.ps1"; exit 1 ;;
     *)            echo "Unsupported OS: $OS"; exit 1 ;;
 esac
 
@@ -230,35 +232,20 @@ else
     info "No ARIAConverted folder found"
 fi
 
-# Aria stores Converted_path in the registry on Windows. On macOS the key
-# name is the same, but which preferences domain holds it isn't confirmed,
-# so every Plogue domain is checked for it.
-if [ "$PLATFORM" = "windows" ]; then
-    ARIA_KEY='HKCU\Software\Plogue Art et Technologie, Inc\Aria'
-    ARIA_PATH="$(reg query "$ARIA_KEY" //v Converted_path 2>/dev/null | sed -n 's/.*REG_SZ[[:space:]]*//p')"
+# On macOS Aria keeps Converted_path in its preferences
+# (~/Library/Preferences/com.plogue.aria.plist, the same file Setup Tracks
+# reads).
+if [ "$PLATFORM" = "macos" ]; then
+    ARIA_PATH="$(defaults read com.plogue.aria Converted_path 2>/dev/null || true)"
     if [ -n "$ARIA_PATH" ]; then
-        if [[ "$(cygpath -u "$ARIA_PATH" 2>/dev/null)" == "$ARIA_CONVERTED"* ]]; then
+        if [[ "$ARIA_PATH" == "$ARIA_CONVERTED"* ]]; then
             if confirm "Clear Aria's Converted_path ($ARIA_PATH)?"; then
-                reg delete "$ARIA_KEY" //v Converted_path //f >/dev/null && ok "Cleared Aria's Converted_path"
+                defaults delete com.plogue.aria Converted_path && ok "Cleared Aria's Converted_path"
             fi
         else
             info "Aria's Converted_path points elsewhere ($ARIA_PATH) -- left alone"
         fi
     fi
-elif [ "$PLATFORM" = "macos" ]; then
-    for plist in "$HOME"/Library/Preferences/*[Pp]logue*.plist; do
-        [ -f "$plist" ] || continue
-        domain="$(basename "$plist" .plist)"
-        ARIA_PATH="$(defaults read "$domain" Converted_path 2>/dev/null || true)"
-        [ -n "$ARIA_PATH" ] || continue
-        if [[ "$ARIA_PATH" == "$ARIA_CONVERTED"* ]]; then
-            if confirm "Clear Aria's Converted_path in $domain ($ARIA_PATH)?"; then
-                defaults delete "$domain" Converted_path && ok "Cleared Converted_path in $domain"
-            fi
-        else
-            info "Converted_path in $domain points elsewhere ($ARIA_PATH) -- left alone"
-        fi
-    done
 fi
 
 # ============================================================================
@@ -278,12 +265,6 @@ if [ "$PLATFORM" = "macos" ]; then
         "$HOME/Library/Audio/Plug-Ins/VST3/sforzando.vst3"
         "$HOME/Library/Audio/Plug-Ins/Components/sforzando.component"
         "$HOME/Library/Audio/Plug-Ins/CLAP/Plogue/sforzando.clap"
-    )
-elif [ "$PLATFORM" = "windows" ]; then
-    SFZ_PATHS=(
-        "${PROGRAMFILES:-/c/Program Files}/Common Files/VST3/sforzando.vst3"
-        "${PROGRAMFILES:-/c/Program Files}/VSTPlugins/sforzando.dll"
-        "${PROGRAMFILES:-/c/Program Files}/Steinberg/VstPlugins/sforzando.dll"
     )
 elif [ "$PLATFORM" = "linux" ]; then
     # Plogue's Linux beta (install_sforzando.sh) apt-installs its .debs on

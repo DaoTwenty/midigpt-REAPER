@@ -416,6 +416,7 @@
   - [Building a Release](#building-a-release)
   - [Project Layout](#project-layout)
   - [Opening Issues / PRs](#opening-issues-prs)
+  - [Future Work](#future-work)
 - [Acknowledgments](#acknowledgments)
 - [License](#license)
 
@@ -605,9 +606,35 @@ git push origin vX.Y.Z
 
 Review the draft (its notes are auto-generated, so worth a pass) and publish it from the GitHub UI, or `gh release edit vX.Y.Z --draft=false`. To build the zip locally without publishing anything: `./dev/build_release.sh`.
 
+#### Clean-machine checks
+
+CI runs the installer on macOS, Linux and Windows but never starts REAPER or Sforzando, so before a release that changes an OS's install path (the installer, Setup Tracks, the dev reset script), run that OS's check below by hand. Each one starts from a machine with no previous MIDI-GPT or Sforzando install; use the dev reset script to get there if it has one.
+
+#### macOS clean-machine check
+
+Start with REAPER installed and launched once, plus Python 3.10–3.12 and git. If the machine had a previous install, close REAPER and run `./dev/dev_reset.sh` first.
+
+1. **Sforzando:** install it from Plogue's [product page](https://www.plogue.com/products/sforzando.html), keeping the VST and/or VST3 build selected in its installer (AU and CLAP alone aren't enough for Setup Tracks).
+2. **Installer:** run `./install.sh` (or double-click `Install - Mac.command`) and answer **y** to the Arachno download. Expect no `[WARN]` lines other than "No published checksum for ReaImGui".
+3. **REAPER:** *REAPER > Settings > Plug-Ins > ReaScript* shows Python as detected, and the FX browser lists **sforzando (VST)** or **sforzando (VST3)**.
+4. **Setup Tracks:** import a multitrack `.mid` file (one track per MIDI channel) and run Setup Tracks. The first run prints "Converting the Arachno SoundFont…", then every track gets a Sforzando instance, and playback is audible with the track meters moving.
+5. **Dashboard:** open `MIDI-GPT.py`. The banner lines up without drifted columns or clipping, and generating over a time selection writes new MIDI.
+6. **Reset:** close REAPER and run `./dev/dev_reset.sh`. Every category reports something removed (Sforzando's plugin files may ask for your password), and afterwards no `sforzando.*` bundle is left under `/Library/Audio/Plug-Ins/` or `~/Library/Audio/Plug-Ins/`, `soundfonts/` holds no `.sf2` or converted presets, and `reaper.ini` has no `reascript`/`pythonlib*` keys. Repeating steps 1–5 from here should pass again.
+
+#### Windows clean-machine check
+
+Start from Windows 10 or 11 (64-bit) with REAPER 64-bit installed and launched once, plus Python 3.10–3.12 and git. Leave the Microsoft Visual C++ Runtime *uninstalled* if you can, since installing it is part of what's being checked. If the machine had a previous install, close REAPER and run `.\dev\dev_reset.ps1` in PowerShell first.
+
+1. **Sforzando:** install it from Plogue's [product page](https://www.plogue.com/products/sforzando.html), keeping the VST3 (or VST2) build selected.
+2. **Installer:** double-click `Install - Windows.bat` (or run `.\install.ps1` in PowerShell) and answer **y** to the Arachno download. If the Visual C++ Runtime is missing or older than 14.40, the installer says so and offers to install it (one administrator prompt), and PyTorch then imports without errors. Expect no other `[WARN]` lines apart from "No published checksum for ReaImGui".
+3. **REAPER:** *Options > Preferences > Plug-Ins > ReaScript* shows Python as detected, and the FX browser lists **sforzando (VST3)** or **sforzando (VST)**.
+4. **Setup Tracks:** import a multitrack `.mid` file (one track per MIDI channel) and run Setup Tracks. The first run prints "Converting the Arachno SoundFont…", then every track gets a Sforzando instance, and playback is audible with the track meters moving.
+5. **Dashboard:** open `MIDI-GPT.py`. The banner lines up without drifted columns or clipping, and generating over a time selection writes new MIDI.
+6. **Reset:** close REAPER and run `.\dev\dev_reset.ps1`. Every category reports something removed, and afterwards `C:\Program Files\Common Files\VST3\sforzando.vst3` is gone, `soundfonts\` holds no `.sf2` or converted presets, and `reaper.ini` has no `reascript`/`pythonlib*` keys. The Visual C++ Runtime stays installed, so repeat steps 1–5 on a machine that never had it to recheck that step.
+
 #### Linux clean-machine check
 
-CI runs the installer on Linux but never starts REAPER or Sforzando, so run this before a release that changes the Linux install path (`install.sh`, Setup Tracks, `dev/dev_reset.sh`). Start from a Linux machine with no previous MIDI-GPT or Sforzando install (run `./dev/dev_reset.sh` first if it has one): REAPER installed from its Linux tarball and launched once, plus Python 3.10–3.12 and git.
+Start with REAPER installed from its Linux tarball and launched once, plus Python 3.10–3.12 and git. If the machine had a previous install, close REAPER and run `./dev/dev_reset.sh` first.
 
 1. **Sforzando:** download "sforzando for Linux (beta)" from Plogue's [downloads page](https://www.plogue.com/downloads.html#sforzando), unzip it and run `./install_sforzando.sh`.
 2. **Installer:** run `./install.sh` and answer **y** to the Arachno download. Expect no `[WARN]` lines other than "No published checksum for ReaImGui", and `[OK] VST plug-in paths: ...;/usr/lib/vst3`.
@@ -620,13 +647,21 @@ CI runs the installer on Linux but never starts REAPER or Sforzando, so run this
 
 - `src/Scripts/MIDI-GPT/` — the 5 REAPER action scripts, the `midigpt_dashboard/` UI package, and `midi_extraction.py` (the REAPER ↔ MIDI-GPT conversion layer)
 - `tests/` — unit tests (`pytest`) plus `tests/integration/` (install-pipeline and REAPER-state coverage, run in CI on macOS/Linux/Windows)
-- `dev/` — maintainer-only tooling (`build_release.sh`, `dev_reset.sh`) — never shipped to end users
+- `dev/` — maintainer-only tooling (`build_release.sh`, `dev_reset.sh` for macOS/Linux, `dev_reset.ps1` for Windows) — never shipped to end users
 - `install.sh` / `install.ps1` and the clickable launchers — the installer
 - `docs/` — the GitHub Pages version of this README, auto-generated by `build_docs.py` from this file plus `INSTRUMENTS.md`/`VST.md` — never hand-edit `docs/index.html` directly
 
 ### Opening Issues / PRs
 
 Bug reports and feature requests are welcome via [GitHub Issues](https://github.com/Metacreation-Lab/midigpt-REAPER/issues). For pull requests: run the test suite above before opening one, and keep the PR description focused on what changed and why — the codebase leans heavily on inline comments explaining *why* something is written the way it is, not just what it does, so match that style where it's relevant to your change.
+
+### Future Work
+
+Known gaps and features we'd like to add. Contributions are welcome:
+
+- **Start REAPER in CI.** CI installs on every OS but never launches REAPER, so anything that only shows up inside REAPER (ReaScript not finding Python, the dashboard failing to load ReaImGui) still needs a manual [clean-machine check](#clean-machine-checks). On Linux, CI could download REAPER's portable build and run a startup ReaScript that confirms ReaScript Python loads and `import imgui` works.
+- **AU and CLAP Sforzando in Setup Tracks.** Setup Tracks only knows how to build REAPER's FX data for Sforzando's VST and VST3 builds, so an AU- or CLAP-only install gets a message asking for VST/VST3 instead.
+- **Verified ReaImGui downloads.** ReaImGui's releases on Codeberg don't publish checksums, so the installers install it unverified (with a warning). Both installers already check a published `sha256`/digest when one exists, so this needs nothing from us once upstream starts publishing them.
 
 ---
 
