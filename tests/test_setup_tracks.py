@@ -13,6 +13,7 @@ session.
 
 import base64
 import importlib
+import json
 import os
 import struct
 import subprocess
@@ -270,17 +271,17 @@ class TestFindAriaConverterLinux:
 
     def test_uses_sf2_converter_from_config(self, aria):
         config, converter = aria
-        config.write_text(f'{{"base_dir": "/elsewhere", "Converters": {{"sf2": "{converter}"}}}}')
+        config.write_text(json.dumps({"base_dir": "/elsewhere", "Converters": {"sf2": str(converter)}}))
         assert setup_tracks._find_aria_converter() == str(converter)
 
     def test_falls_back_to_base_dir(self, aria):
         config, converter = aria
-        config.write_text(f'{{"base_dir": "{converter.parent}"}}')
+        config.write_text(json.dumps({"base_dir": str(converter.parent)}))
         assert setup_tracks._find_aria_converter() == str(converter)
 
     def test_listed_converter_missing(self, aria):
         config, converter = aria
-        config.write_text(f'{{"Converters": {{"sf2": "{converter.parent / "gone"}"}}}}')
+        config.write_text(json.dumps({"Converters": {"sf2": str(converter.parent / "gone")}}))
         assert setup_tracks._find_aria_converter() is None
 
     def test_no_config(self, aria):
