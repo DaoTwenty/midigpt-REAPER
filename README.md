@@ -130,7 +130,7 @@ After installing, load the dashboard into REAPER once:
 ### Updating / Uninstalling
 
 - **Update:** `./update.sh` / `.\update.ps1` (accepts any installer flag, e.g. `./update.sh --torch-gpu`)
-- **Uninstall:** `./uninstall.sh` / `.\uninstall.ps1` — removes the Python virtual environment, the REAPER Scripts integration, and the downloaded Arachno soundfont. Leaves ReaPack, ReaImGui, Sforzando, and REAPER's ReaScript/Python settings in place (you may be using them for something else), and asks first about deleting cached model checkpoints (from `huggingface_hub`'s shared cache) and the plugin folder itself.
+- **Uninstall:** `./uninstall.sh` / `.\uninstall.ps1` — removes the Python virtual environment, the REAPER Scripts integration, and the downloaded Arachno soundfont. Leaves ReaPack, ReaImGui, Sforzando, and REAPER's ReaScript/Python settings in place (you may be using them for something else; on Linux it prints the `apt remove` command for Sforzando), and asks first about deleting cached model checkpoints (from `huggingface_hub`'s shared cache) and the plugin folder itself.
 
 ---
 
@@ -162,6 +162,8 @@ Every track gets an **I** (Ignore — exclude this track entirely) and an **A** 
 **Setup Tracks** / **Setup Selected Tracks** detects each track's GM instrument straight from its MIDI content (channel 10 → drums, otherwise its first Program Change event) and adds a ready-to-play Sforzando + Arachno instance for it — no manual synth routing, no template tracks. Tracks it can't resolve automatically can be confirmed or overridden individually. See [INSTRUMENTS.md](INSTRUMENTS.md) for the full instrument name/keyword reference, and [VST.md](VST.md) for how the automatic setup works under the hood. `MIDI-GPT Replace Instruments.py` force-replaces whatever instrument is on selected tracks, for when you want to redo one by hand.
 
 This automatic setup only recognizes Sforzando's **VST or VST3** build in REAPER's plugin list — when installing Sforzando, make sure REAPER has scanned one of those. **AU and CLAP are not supported** (its installer also offers them, but Setup Tracks has no FX chunk format for either). If Setup Tracks reports Sforzando isn't in REAPER's plugin list, check **Options > Preferences > Plug-ins > VST** and rescan.
+
+**Linux:** Sforzando for Linux is a **beta** from Plogue. It works with MIDI-GPT (its VST3 was tested end to end on Ubuntu 24.04 with REAPER 7.80: Setup Tracks, SoundFont conversion, generation), but it may be less stable than the macOS/Windows builds and may change without notice. Get it from Plogue's [downloads page](https://www.plogue.com/downloads.html#sforzando) ("sforzando for Linux (beta)"): unzip it, open a terminal in that folder and run `./install_sforzando.sh` — Plogue's own installer, which asks for your password itself (don't prefix `sudo`). It installs to `/opt/Plogue` (a fixed path) and puts the plugins in `/usr/lib/vst3` and `/usr/lib/clap`. REAPER on Linux doesn't scan `/usr/lib/vst3` by default, so `install.sh` adds it to REAPER's VST paths; restart REAPER after installing Sforzando. On a minimal install without a desktop environment, Sforzando also needs `sudo apt install libxcb-util1`.
 
 ### Hint Mode, Themes, Settings
 

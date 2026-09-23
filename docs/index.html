@@ -493,7 +493,7 @@ After installing, load the dashboard into REAPER once:
 ### Updating / Uninstalling
 
 - **Update:** `./update.sh` / `.\update.ps1` (accepts any installer flag, e.g. `./update.sh --torch-gpu`)
-- **Uninstall:** `./uninstall.sh` / `.\uninstall.ps1` — removes the Python virtual environment, the REAPER Scripts integration, and the downloaded Arachno soundfont. Leaves ReaPack, ReaImGui, Sforzando, and REAPER's ReaScript/Python settings in place (you may be using them for something else), and asks first about deleting cached model checkpoints (from `huggingface_hub`'s shared cache) and the plugin folder itself.
+- **Uninstall:** `./uninstall.sh` / `.\uninstall.ps1` — removes the Python virtual environment, the REAPER Scripts integration, and the downloaded Arachno soundfont. Leaves ReaPack, ReaImGui, Sforzando, and REAPER's ReaScript/Python settings in place (you may be using them for something else; on Linux it prints the `apt remove` command for Sforzando), and asks first about deleting cached model checkpoints (from `huggingface_hub`'s shared cache) and the plugin folder itself.
 
 ---
 
@@ -525,6 +525,8 @@ Every track gets an **I** (Ignore — exclude this track entirely) and an **A** 
 **Setup Tracks** / **Setup Selected Tracks** detects each track's GM instrument straight from its MIDI content (channel 10 → drums, otherwise its first Program Change event) and adds a ready-to-play Sforzando + Arachno instance for it — no manual synth routing, no template tracks. Tracks it can't resolve automatically can be confirmed or overridden individually. See [INSTRUMENTS.md](INSTRUMENTS.md) for the full instrument name/keyword reference, and [VST.md](VST.md) for how the automatic setup works under the hood. `MIDI-GPT Replace Instruments.py` force-replaces whatever instrument is on selected tracks, for when you want to redo one by hand.
 
 This automatic setup only recognizes Sforzando's **VST or VST3** build in REAPER's plugin list — when installing Sforzando, make sure REAPER has scanned one of those. **AU and CLAP are not supported** (its installer also offers them, but Setup Tracks has no FX chunk format for either). If Setup Tracks reports Sforzando isn't in REAPER's plugin list, check **Options > Preferences > Plug-ins > VST** and rescan.
+
+**Linux:** Sforzando for Linux is a **beta** from Plogue. It works with MIDI-GPT (its VST3 was tested end to end on Ubuntu 24.04 with REAPER 7.80: Setup Tracks, SoundFont conversion, generation), but it may be less stable than the macOS/Windows builds and may change without notice. Get it from Plogue's [downloads page](https://www.plogue.com/downloads.html#sforzando) ("sforzando for Linux (beta)"): unzip it, open a terminal in that folder and run `./install_sforzando.sh` — Plogue's own installer, which asks for your password itself (don't prefix `sudo`). It installs to `/opt/Plogue` (a fixed path) and puts the plugins in `/usr/lib/vst3` and `/usr/lib/clap`. REAPER on Linux doesn't scan `/usr/lib/vst3` by default, so `install.sh` adds it to REAPER's VST paths; restart REAPER after installing Sforzando. On a minimal install without a desktop environment, Sforzando also needs `sudo apt install libxcb-util1`.
 
 ### Hint Mode, Themes, Settings
 
@@ -888,6 +890,8 @@ This is the default, and what most people should just use.
 
 When Sforzando's installer asks which plugin formats to install, pick **VST or VST3** — Setup Tracks builds REAPER's FX chunk for one of those two. **AU and CLAP are not supported**, by design, not just untested: Setup Tracks has no FX chunk format for either, so an AU- or CLAP-only install leaves it reporting Sforzando isn't in REAPER's plugin list even though it's installed.
 
+**Linux:** Sforzando for Linux is a **beta** from Plogue — it works with MIDI-GPT's automatic setup (VST3, tested on Ubuntu 24.04), but may be less stable than the macOS/Windows builds. It comes as a zip on Plogue's [downloads page](https://www.plogue.com/downloads.html#sforzando) rather than a single installer: unzip it and run `./install_sforzando.sh` in a terminal (without `sudo`; it asks for your password itself). There's no format choice — it always installs both VST3 (`/usr/lib/vst3`) and CLAP (`/usr/lib/clap`), plus the Aria engine and the SoundFont converter Setup Tracks uses under `/opt/Plogue`. REAPER on Linux only scans `~/.vst` and `~/.vst3` by default, so `install.sh` adds `/usr/lib/vst3` to its VST paths; without that, only the unsupported CLAP build shows up. On a minimal system without a desktop environment, also install `libxcb-util1` (the engine needs it, but Plogue's packages don't declare it).
+
 **Using it:** from the dashboard (`MIDI-GPT.py`),
 - **Setup Tracks** — detects each track's GM instrument from its MIDI content (channel 10 → drums, otherwise its first Program Change event) and adds a fresh Sforzando+Arachno instance with the correct GM program already selected, for any track that doesn't have an instrument yet. Safe to re-run: it never touches a track's instrument unless it added it in the first place.
 - **Setup Selected Tracks** — same thing, scoped to the current selection instead of the whole project.
@@ -918,7 +922,7 @@ For doing it by hand instead — a custom soundfont other than Arachno, a dedica
 ### Loading instruments by hand
 
 1. Create a track, click **FX**, add **Sforzando**.
-2. Inside Sforzando: **Instrument → Import**, select your `.sf2` file, then **Instrument → Converted → sf2 →** pick the GM program you want. Each program number corresponds to a GM instrument — this mapping is what generated MIDI expects for correct playback (see [INSTRUMENTS.md](INSTRUMENTS.md)).
+2. Inside Sforzando: **Instrument → Import**, select your `.sf2` file (on Linux this is the only way — dropping files onto Sforzando's window doesn't work there), then **Instrument → Converted → sf2 →** pick the GM program you want. Each program number corresponds to a GM instrument — this mapping is what generated MIDI expects for correct playback (see [INSTRUMENTS.md](INSTRUMENTS.md)).
 3. For drums, either select Arachno's own GM drum kit the same way, or add your dedicated drum plugin on its own track instead and route drum MIDI (typically channel 10) to it.
 
 If you re-scan and a newly installed plugin still isn't showing up, try **Preferences → Plug-ins → VST → Clear cache / re-scan**.
