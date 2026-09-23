@@ -255,17 +255,48 @@ otheroption=hello
 EOF
 cp "$FAKE/reaper.ini" "$WORK_DIR/s6_original.ini"
 run_install "$FAKE" false
+RUN_EXIT=$?
+# The reaper.ini keys below are written partway through Step 5, so they can
+# all look right even if the installer died later in that step (set -e).
+TESTS=$((TESTS + 1))
+if [ "$RUN_EXIT" -eq 0 ]; then pass "install.sh exits 0"; else fail_test "install.sh exited $RUN_EXIT"; fi
+assert_contains "installer runs to completion" "$WORK_DIR/last_run.log" "Installation Complete"
 assert_ini_well_formed "after first run" "$FAKE/reaper.ini"
 assert_true "unrelated options survive in the [reaper] section" \
     bash -c "[ \"\$1\" = 1 ] && [ \"\$2\" = hello ]" _ \
     "$(reaper_key "$FAKE/reaper.ini" someoption)" "$(reaper_key "$FAKE/reaper.ini" otheroption)"
 assert_true "reaper.ini.midigpt-backup holds the original" cmp -s "$FAKE/reaper.ini.midigpt-backup" "$WORK_DIR/s6_original.ini"
+if [ "$(uname -s)" = "Linux" ]; then
+    # No vstpath key yet: REAPER's own default, kept literal (not ~-expanded), plus /usr/lib/vst3.
+    assert_true "vstpath = REAPER's default + /usr/lib/vst3 (Linux)" \
+        test "$(reaper_key "$FAKE/reaper.ini" vstpath)" = "~/.vst;~/.vst3;/usr/lib/vst3"
+fi
 
 # ── Re-run: keys should update in place, not duplicate ──
 run_install "$FAKE" false
 assert_ini_well_formed "after second run" "$FAKE/reaper.ini"
 assert_line_count "exactly one reascript= line after two runs" 1 grep "^reascript=" "$FAKE/reaper.ini"
 assert_line_count "exactly one pythonlibdll64= line after two runs" 1 grep "^pythonlibdll64=" "$FAKE/reaper.ini"
+
+# ============================================================================
+scenario "reaper.ini with the user's own VST paths"
+# ============================================================================
+# On Linux the installer appends /usr/lib/vst3 (where Sforzando's .deb puts its
+# VST3; REAPER only scans ~/.vst;~/.vst3 by default). Elsewhere it must not
+# touch vstpath at all.
+FAKE="$WORK_DIR/s6b_user_vstpath"
+mkdir -p "$FAKE"
+printf '[REAPER]\nvstpath=/my/plugins;~/.vst3\n' > "$FAKE/reaper.ini"
+run_install "$FAKE" false
+run_install "$FAKE" false
+if [ "$(uname -s)" = "Linux" ]; then
+    assert_true "user's paths kept, /usr/lib/vst3 appended (Linux)" \
+        test "$(reaper_key "$FAKE/reaper.ini" vstpath)" = "/my/plugins;~/.vst3;/usr/lib/vst3"
+else
+    assert_true "vstpath left exactly as it was (non-Linux)" \
+        test "$(reaper_key "$FAKE/reaper.ini" vstpath)" = "/my/plugins;~/.vst3"
+fi
+assert_line_count "exactly one vstpath= line after two runs" 1 grep "^vstpath=" "$FAKE/reaper.ini"
 
 # ============================================================================
 scenario "reaper.ini with lowercase [reaper] section header and another section"

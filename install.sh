@@ -903,7 +903,9 @@ if [ -f "$REAPER_INI" ]; then
             # REAPER on Linux doesn't scan by default (~/.vst;~/.vst3 only), so
             # without this only its CLAP shows up -- and Setup Tracks can't use CLAP.
             if [ "$PLATFORM" = "linux" ]; then
-                VST_PATH="$(grep -m1 '^vstpath=' "$REAPER_INI" | cut -d= -f2-)"
+                # || true: no vstpath= line yet is the normal fresh case, and
+                # grep's exit 1 would otherwise abort the installer (set -e).
+                VST_PATH="$(grep -m1 '^vstpath=' "$REAPER_INI" | cut -d= -f2- || true)"
                 [ -n "$VST_PATH" ] || VST_PATH='~/.vst;~/.vst3'
                 case ";$VST_PATH;" in
                     *";/usr/lib/vst3;"*) ;;
