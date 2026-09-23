@@ -355,8 +355,20 @@ class TestPrepareInstrumentSetup:
         assert any("drag" in p for p in printed)
 
     def test_no_sforzando(self, fake_repo, monkeypatch):
+        printed = []
+        monkeypatch.setattr(setup_tracks, "print", lambda *a, **k: printed.append(" ".join(map(str, a))), raising=False)
         monkeypatch.setattr(setup_tracks, "_sforzando_plugin_format", lambda: None)
+        monkeypatch.setattr(setup_tracks, "_sforzando_au_or_clap_only", lambda: False)
         assert setup_tracks.prepare_instrument_setup() is None
+        assert any("isn't in REAPER's plugin list" in p for p in printed)
+
+    def test_au_or_clap_only_gets_a_specific_message(self, fake_repo, monkeypatch):
+        printed = []
+        monkeypatch.setattr(setup_tracks, "print", lambda *a, **k: printed.append(" ".join(map(str, a))), raising=False)
+        monkeypatch.setattr(setup_tracks, "_sforzando_plugin_format", lambda: None)
+        monkeypatch.setattr(setup_tracks, "_sforzando_au_or_clap_only", lambda: True)
+        assert setup_tracks.prepare_instrument_setup() is None
+        assert any("only as AU or CLAP" in p for p in printed)
 
 
 class TestSforzandoPluginFormat:
@@ -388,6 +400,35 @@ class TestSforzandoPluginFormat:
     def test_no_cache_assumes_platform_default(self, tmp_path, monkeypatch):
         self._resource_dir(tmp_path, monkeypatch, "Windows", None)
         assert setup_tracks._sforzando_plugin_format() == "vst3"
+
+
+class TestSforzandoAuOrClapOnly:
+    def _resource_dir(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(setup_tracks, "RPR_GetResourcePath", lambda: str(tmp_path), raising=False)
+
+    def test_true_for_real_au_cache_line(self, tmp_path, monkeypatch):
+        # The real line from a macOS REAPER's AU cache -- a free-form
+        # "<manufacturer>: <name>" key, not a fixed filename like VST/CLAP.
+        self._resource_dir(tmp_path, monkeypatch)
+        (tmp_path / "reaper-auplugins_arm64.ini").write_text(
+            "[auplugins]\nPlogue Art et Technologie: sforzando=<inst>\n")
+        assert setup_tracks._sforzando_au_or_clap_only() is True
+
+    def test_true_for_real_clap_cache_line(self, tmp_path, monkeypatch):
+        self._resource_dir(tmp_path, monkeypatch)
+        (tmp_path / "reaper-clap-macos-aarch64.ini").write_text(
+            '[sforzando.clap]\ncom.Plogue Art et Technologie, Inc.sforzando=1|sforzando '
+            '(Plogue Art et Technologie, Inc)\n')
+        assert setup_tracks._sforzando_au_or_clap_only() is True
+
+    def test_false_when_absent(self, tmp_path, monkeypatch):
+        self._resource_dir(tmp_path, monkeypatch)
+        (tmp_path / "reaper-auplugins_arm64.ini").write_text("[auplugins]\nApple: AUDelay=<!inst>\n")
+        assert setup_tracks._sforzando_au_or_clap_only() is False
+
+    def test_false_when_no_caches_at_all(self, tmp_path, monkeypatch):
+        self._resource_dir(tmp_path, monkeypatch)
+        assert setup_tracks._sforzando_au_or_clap_only() is False
 
 
 class TestGmInternalName:

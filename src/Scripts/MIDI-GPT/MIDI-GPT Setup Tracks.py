@@ -426,6 +426,25 @@ def _sforzando_plugin_format():
             return fmt
     return None
 
+def _sforzando_au_or_clap_only():
+    """True if REAPER has scanned an AU or CLAP build of Sforzando --
+    checked only when _sforzando_plugin_format() finds neither VST nor
+    VST3, to tell "not installed" apart from "installed, but not in a
+    supported format" (Setup Tracks has no FX chunk format for AU or
+    CLAP, unlike VST/VST3 -- see VST.md). Matched by substring rather
+    than an exact key, since AU's cache key is a free-form
+    "<manufacturer>: <name>" string (e.g. "Plogue Art et Technologie:
+    sforzando"), not a fixed filename like VST/CLAP's."""
+    for pattern in ("reaper-auplugins*.ini", "reaper-clap*.ini"):
+        for cache in glob.glob(os.path.join(RPR_GetResourcePath(), pattern)):
+            try:
+                with open(cache, encoding="utf-8", errors="replace") as f:
+                    if "sforzando" in f.read().lower():
+                        return True
+            except OSError:
+                continue
+    return False
+
 # ---------------------------------------------------------------------------
 # Chunk building
 # ---------------------------------------------------------------------------
@@ -696,8 +715,13 @@ def prepare_instrument_setup():
     saying why) if Sforzando isn't available to REAPER at all."""
     plugin_format = _sforzando_plugin_format()
     if plugin_format is None:
-        print("Sforzando isn't in REAPER's plugin list -- install it (see VST.md), then in REAPER: "
-              "Options > Preferences > Plug-ins > VST > Re-scan.\n")
+        if _sforzando_au_or_clap_only():
+            print("Sforzando is installed, but only as AU or CLAP -- Setup Tracks doesn't support "
+                  "either (see VST.md). Install the VST or VST3 build instead, then in REAPER: "
+                  "Options > Preferences > Plug-ins > VST > Re-scan.\n")
+        else:
+            print("Sforzando isn't in REAPER's plugin list -- install it (see VST.md), then in REAPER: "
+                  "Options > Preferences > Plug-ins > VST > Re-scan.\n")
         return None
     use_sfz_files, reason = ensure_arachno_sfz()
     if use_sfz_files:
