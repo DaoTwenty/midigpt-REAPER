@@ -275,7 +275,9 @@ if ($FoundSfz.Count -eq 0) {
                 Remove-Item $P -Recurse -Force -ErrorAction Stop
                 Write-OK "Removed $P"
             } catch {
-                Write-Warn "Couldn't remove $P (needs administrator rights) -- re-run this from an elevated PowerShell, or uninstall Sforzando from Settings > Apps"
+                # Usually REAPER still having the plugin loaded (it locks the
+                # file); otherwise missing administrator rights.
+                Write-Warn "Couldn't remove $P -- close REAPER and retry, or re-run this from an elevated PowerShell, or uninstall Sforzando from Settings > Apps"
             }
         }
     }
